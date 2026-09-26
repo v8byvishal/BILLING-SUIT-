@@ -13,11 +13,9 @@ jobs:
         with: {node-version: '20', cache: 'npm'}
       - uses: actions/setup-python@v5
         with: {python-version: '3.11', cache: 'pip'}
-      - run: npm ci
-      - run: pip install -r packaging/requirements-executor.txt
-      - run: npm test
-      - run: npm run build:python:win
-      - run: npm run release:win
+      - name: Build and verify Windows release
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64-release
@@ -25,3 +23,4 @@ jobs:
             release/*.exe
             release/release-manifest.json
             release/SHA256SUMS.txt
+            release/WINDOWS_RELEASE_ACCEPTANCE.txt
