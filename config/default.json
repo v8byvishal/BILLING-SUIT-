@@ -1,0 +1,13 @@
+{
+  "environment": "production",
+  "storagePath": null,
+  "logging": {
+    "level": "INFO"
+  },
+  "networkProfile": "default",
+  "features": {
+    "billWorkflow": false,
+    "enhancementWorkflow": false,
+    "finalBillWorkflow": false
+  }
+}

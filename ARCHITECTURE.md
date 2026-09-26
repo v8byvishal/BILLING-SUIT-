@@ -1,0 +1,76 @@
+# CGHS Billing Suite VNEXT — Foundation Architecture
+
+## Phase 1 decision
+
+Electron remains the desktop technology because the repository already contains a proven Electron baseline. Phase 1 introduces a minimal folder-based shell without moving, importing, or changing the legacy Python enhancement system or HFOS application.
+
+## Runtime layers
+
+```text
+Renderer (`src/ui`)
+  ↓ explicit read-only IPC methods
+Preload (`src/desktop/preload.js`)
+  ↓ allowlisted channels only
+Electron main (`src/desktop/main.js`)
+  ↓
+Core foundations (`src/core`)
+  ├─ configuration
+  ├─ external Storage
+  ├─ structured logging
+  └─ application state
+```
+
+The renderer has `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. It receives only four explicit methods: application status, Storage information, public configuration, and renderer-ready reporting. There is no shell execution, arbitrary path access, file mutation, parser, Selenium, CDP, or portal IPC.
+
+## External Storage
+
+Default runtime location:
+
+```text
+<OS Documents>/CGHS Billing Suite VNEXT/Storage/
+```
+
+An absolute override can be supplied with `VNEXT_STORAGE_PATH`. Relative paths and paths inside the application/package are rejected. Startup creates and write-checks:
+
+- `Source_Bills/`
+- `Final_Bills/`
+- `Supporting_Sections/`
+- `Logs/`
+- `Failed/`
+- `Reports/`
+
+The repository `storage/` tree is a documented empty template only; runtime user data is never written there. Long-term naming, encryption, retention, and migration remain later-phase decisions.
+
+## Existing database
+
+The old root `main.js` contains the v5 encrypted sql.js database implementation. It is intentionally untouched and remains reference/legacy code. The Phase 1 shell does not create a database. Future phases must decide migration only after regression characterization.
+
+## Error and shutdown boundary
+
+Initialization is guarded. Configuration, Storage, logger, and renderer failures are surfaced via logs/console and a desktop error dialog where possible. Uncaught exceptions and rejected promises are fatal and controlled. Shutdown writes a final structured log entry. If Storage itself cannot be initialized, writing to its log directory is impossible; the error is still surfaced through stderr and the desktop dialog.
+
+## Application state
+
+`src/core/app-state.js` declares the PRD workflow vocabulary and initializes to `IDLE`. Phase 1 does not execute transitions or claim completed business work.
+
+## Future integration boundary
+
+Later approved phases may connect:
+
+```text
+Desktop UI → Application Services → CGHS Enhancement Engine → Portal Adapter
+```
+
+`src/services/` and `src/adapters/` are reserved boundaries, not implementations. `app (1).py` remains the untouched legacy baseline and is not loaded by the shell.
+
+## Development and packaging
+
+- Install pinned dependencies: `npm install`
+- Run locally: `npm start`
+- Development environment: `npm run dev` (POSIX shell; on Windows set `VNEXT_ENV=development` before `npm start`)
+- Run foundation unit tests: `npm test`
+- Run Electron launch/IPC/shutdown smoke test: `npm run test:desktop`
+- Create an unpacked host-platform package: `npm run build:dir`
+- Target Windows portable EXE: `npm run build:win`
+
+The current Phase 1 output target is an Electron Builder Windows x64 portable EXE (`CGHS-Billing-Suite-VNEXT-<version>-<arch>.exe`). It is a packaging direction, not a release-ready artifact. Code signing, installer UX, icons, Windows hardware validation, and final portable/installer policy remain unresolved for Phase 9.

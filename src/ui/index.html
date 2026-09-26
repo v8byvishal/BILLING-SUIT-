@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>CGHS Billing Suite VNEXT</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">CGHS BILLING SUITE</p>
+        <h1>VNEXT</h1>
+      </div>
+      <div class="status"><span class="dot"></span><span id="readyStatus">Starting…</span></div>
+    </header>
+
+    <section class="welcome" aria-labelledby="welcomeTitle">
+      <div class="copy">
+        <p class="phase">FOUNDATION · PHASE 1</p>
+        <h2 id="welcomeTitle">Application foundation is ready.</h2>
+        <p>This shell establishes secure desktop startup, configuration, external Storage, and logging. CGHS bill workflows are intentionally not enabled in this phase.</p>
+      </div>
+      <dl class="readiness">
+        <div><dt>Application</dt><dd id="appState">Checking</dd></div>
+        <div><dt>External Storage</dt><dd id="storageState">Checking</dd></div>
+        <div><dt>Environment</dt><dd id="environment">Checking</dd></div>
+      </dl>
+    </section>
+
+    <section class="future" aria-label="Planned workflow areas">
+      <h3>Planned workflow areas</h3>
+      <p>These modules are reserved for later approved phases and are not active.</p>
+      <div class="areas">
+        <article><span>01</span><h4>Bill workflow</h4><p>Not implemented</p></article>
+        <article><span>02</span><h4>Enhancement workflow</h4><p>Not implemented</p></article>
+        <article><span>03</span><h4>Final bill workflow</h4><p>Not implemented</p></article>
+        <article><span>04</span><h4>Settings</h4><p>Foundation only</p></article>
+      </div>
+    </section>
+
+    <footer><span id="version">Version —</span><span id="storagePath">Storage path unavailable</span></footer>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

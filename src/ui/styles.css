@@ -1,0 +1,27 @@
+:root { color-scheme: light; --ink:#17212b; --muted:#65717d; --line:#dce2e7; --surface:#fff; --bg:#f3f5f7; --blue:#215a86; --green:#23815b; }
+* { box-sizing:border-box; }
+body { margin:0; min-width:720px; background:var(--bg); color:var(--ink); font:14px/1.5 "Segoe UI", Arial, sans-serif; }
+.shell { max-width:1180px; min-height:100vh; margin:auto; padding:36px 44px 24px; display:flex; flex-direction:column; gap:28px; }
+.topbar { display:flex; justify-content:space-between; align-items:center; }
+.eyebrow,.phase { margin:0; color:var(--blue); font-size:11px; font-weight:700; letter-spacing:.16em; }
+h1 { margin:-2px 0 0; font-size:29px; letter-spacing:-.04em; }
+.status { display:flex; gap:9px; align-items:center; padding:8px 12px; border:1px solid var(--line); border-radius:20px; background:var(--surface); color:var(--muted); font-size:12px; }
+.dot { width:8px; height:8px; border-radius:50%; background:#b98a28; }
+.dot.ready { background:var(--green); }
+.welcome { display:grid; grid-template-columns:1.5fr 1fr; gap:46px; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:42px; box-shadow:0 8px 30px rgba(29,45,58,.05); }
+.copy h2 { margin:12px 0; font-size:33px; line-height:1.15; letter-spacing:-.035em; }
+.copy > p:last-child { max-width:650px; color:var(--muted); font-size:15px; }
+.readiness { margin:0; border-left:1px solid var(--line); padding-left:34px; }
+.readiness div { padding:12px 0; border-bottom:1px solid var(--line); }
+.readiness dt { color:var(--muted); font-size:12px; }
+.readiness dd { margin:3px 0 0; font-weight:650; }
+.future h3 { margin:0; font-size:18px; }
+.future > p { margin:5px 0 16px; color:var(--muted); }
+.areas { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.areas article { padding:20px; border:1px solid var(--line); border-radius:10px; background:#f8f9fa; }
+.areas span { color:var(--blue); font-size:11px; font-weight:700; }
+.areas h4 { margin:18px 0 4px; }
+.areas p { margin:0; color:var(--muted); font-size:12px; }
+footer { margin-top:auto; display:flex; justify-content:space-between; gap:20px; color:var(--muted); font-size:11px; }
+#storagePath { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }
+@media (max-width:900px) { .welcome { grid-template-columns:1fr; } .readiness { border-left:0; border-top:1px solid var(--line); padding:20px 0 0; } .areas { grid-template-columns:repeat(2,1fr); } }

@@ -1,0 +1,17 @@
+node_modules/
+release/
+dist/
+out/
+coverage/
+*.log
+.DS_Store
+
+# Runtime operational data belongs in external Storage, never source control.
+storage/*
+!storage/Source_Bills/
+!storage/Final_Bills/
+!storage/Supporting_Sections/
+!storage/Logs/
+!storage/Failed/
+!storage/Reports/
+!storage/**/.gitkeep

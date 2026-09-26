@@ -1,12 +1,43 @@
 {
-  "name": "cghs-billing-suite-pro",
-  "productName": "CGHS Billing Suite Pro",
+  "name": "cghs-billing-suite-vnext",
+  "productName": "CGHS Billing Suite VNEXT",
   "version": "5.0.0-rc.1",
-  "description": "Offline hospital billing system with CGHS rate verification, financial integrity engine and AI validation",
-  "main": "main.js",
+  "description": "Foundation desktop shell for the controlled evolution of the CGHS Billing Suite",
+  "main": "src/desktop/main.js",
   "author": "CGHS Back Office",
   "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dev": "VNEXT_ENV=development electron .",
+    "test": "node --test tests/unit/*.test.js",
+    "test:desktop": "node scripts/smoke-test.js",
+    "test:all": "npm test && npm run test:desktop",
+    "build:dir": "electron-builder --dir",
+    "build:win": "electron-builder --win portable"
+  },
   "dependencies": {
     "sql.js": "1.13.0"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "in.cghsbilling.vnext",
+    "productName": "CGHS Billing Suite VNEXT",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "config/default.json",
+      "package.json",
+      "node_modules/sql.js/**/*"
+    ],
+    "win": {
+      "target": ["portable"],
+      "artifactName": "CGHS-Billing-Suite-VNEXT-${version}-${arch}.${ext}"
+    }
   }
 }
