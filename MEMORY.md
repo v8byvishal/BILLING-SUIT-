@@ -2,65 +2,60 @@
 
 ## Current phase
 
-**Phase 5 — Production PDF Regression, Parser Accuracy Hardening & Enhancement Validation: complete for review.**
+**Phase 6 — Review Queue, Custom/Unslotted Code Registry & Controlled User Overrides: complete for review.**
 
-Phase 1–4 architecture remains intact. Phase 5 patches the existing Phase 2 parser and Phase 3 plan only; it adds no parser replacement, Selenium engine, settlement, discharge, final-bill upload, storage automation, or unrelated UI.
+Phase 1–5 parser/rules and the Phase 4 legacy portal architecture remain intact. No fuzzy resolution, second rate system, Selenium logic, settlement, discharge, final bill, folder automation, or production pharmacy/OT workflow was added.
 
-## Real PDF status
+## Persistent custom registry
 
-The conversation listed `38222.pdf`, `40343.pdf`, `39951.pdf`, and `40332.pdf` as attachments, but `/home/user/uploads` and repository searches contained none of those files during implementation. Therefore:
+- Service: `src/services/custom-codes/custom-code-registry.js`
+- Runtime definitions: `Storage/Custom_Codes/registry.json`
+- Runtime audit: `Storage/Audit/custom-code-audit.jsonl`
+- Both paths are outside the executable and created through the existing Storage architecture.
+- Registry JSON uses atomic temporary-file rename; audit is append-only JSON Lines.
+- Records preserve original entry, canonical exact code, description, optional unit/rate, `MANUAL`/`FIXED`/`PER_DAY` behavior, reason, source, operator, timestamps, active state, override state/reference evidence, notes, scope, and revisions.
 
-**REAL PDF REGRESSION = NOT RUN**
+The bundled 1,998-record `hfos-reference-rates.json` remains byte-identical with SHA-256 `b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba` and remains `RATE_SOURCE_UNDEFINED`.
 
-No real-PDF result is claimed. Synthetic, de-identified production-structure fixtures are under `tests/fixtures/bills/`, with a documented path for adding reviewed real fixtures later.
+## Deterministic resolution and planning
 
-## Parser hardening
+- Reference code wins by default.
+- Exact active custom code resolves as `CUSTOM/LOCAL` only after explicit creation.
+- Reference collision requires `override_authoritative: true` and records reference state plus `OVERRIDE_ENABLED` audit.
+- Inactive custom codes resolve as unknown.
+- Only positive integer `FIXED` quantity behavior can become `CUSTOM_VALID` in Phase 6. `MANUAL` and `PER_DAY` remain review-required; no formulas are accepted.
+- Custom rate is optional and undefined rates are never fabricated.
+- EnhancementPlan captures registry revision, global hash, and relevant per-code fingerprints.
+- The Phase 4 adapter compares current relevant fingerprints and throws `PLAN_STALE` before execution when a material definition changed.
+- Valid `CUSTOM_VALID` actions can cross the existing Phase 4 boundary; unknown/manual/unresolved records remain blocked.
 
-- Added `logical-row-builder.js`, which joins only explicit labeled code fields proven to continue on the immediate next line.
-- Extended code syntax to retain repeated qualifiers such as `B042+043+044` and narrowly normalize spaces such as `B 126` only inside evidenced code tokens.
-- Preserved raw expressions, contributing source lines, page, section, normalization decision, and plan provenance.
-- Restricted unlabeled extraction to standalone/delimiter-bounded code cells so code-like prose does not become an enhancement candidate.
-- Added advisory `POSSIBLY_MISSING_CODE` / `REVIEW_REQUIRED` for structured service+quantity rows without a code; no code is generated or guessed.
-- Kept Patient Payable exclusion before aggregation. Duplicate aggregation continues across pages/repeated headers only within the same semantic section type.
-- Added explicit EnhancementPlan `execution_summary` categories: executable, blocked, and review-required. This is additive to the existing plan contract.
-- Existing CN002, CC001, WC001, and CC002 rules are unchanged and still consume structured evidence.
-- The Phase 4 adapter remains the only browser-bound safety gate and remains compatible.
+## Review workflow and UI
 
-## Fixtures and regression coverage
+`review-queue.js` projects unknown, malformed, unresolved compound, rule-undefined, review-required, unsupported evidence, and missing-code advisories from the existing EnhancementPlan. It exposes raw/normalized evidence, code, page, section, quantity, parser/rule decisions, reason, status, and Review/Add Custom/Dismiss actions.
 
-Human-readable synthetic fixtures:
+Bill-specific review decisions are audit events only and do not create global codes. The minimal UI adds the review table and custom registry with exact text search, add, edit, deactivate/reactivate, and audit viewing. There is no auto-approve action.
 
-- `tests/fixtures/bills/production-structure.json`
-- `tests/fixtures/bills/oxygen-cases.json`
-- `tests/fixtures/bills/stale-bill-b.json`
-- `tests/fixtures/bills/README.md`
-
-Phase 5 adds 24 deterministic cases covering multi-page duplicates, primary/Patient Payable pharmacy separation, ICU/ward special rules, oxygen half/full/ambiguous outcomes, `+L` compounds, repeated-plus compound syntax, wrapped codes, unknown/malformed/undefined outcomes, false-positive prose, repeated headers, continuation pages, 1,000-row volume, mixed executable/blocked plans, missing-code review, state isolation, and Phase 4 adapter compatibility.
-
-## Rate source
-
-The bundled 1,998-record snapshot remains **`RATE_SOURCE_UNDEFINED`**. It is not official, no entry is fabricated, and similar-looking codes are never substituted.
+Audit actions include `CREATED`, `UPDATED`, `DEACTIVATED`, `REACTIVATED`, `OVERRIDE_ENABLED`, `OVERRIDE_DISABLED`, `USED_IN_PLAN`, `BLOCKED`, and `REVIEWED`, with actor/reason/source and limited bill identity context.
 
 ## Validation
 
-- Before Phase 5: **39 tests**.
-- After Phase 5: `npm test` — **63 passed, 0 failed, 0 skipped**.
-- Phase 5 additions: **24 deterministic tests**.
-- JavaScript syntax checks over every `src/**/*.js`: passed.
-- Python syntax checks for the existing Phase 4 modified files `app (1).py` and `portal_bridge.py`: passed; Phase 5 changed no Python.
+- Before Phase 6: **63 tests**.
+- After Phase 6: `npm test` — **83 passed, 0 failed, 0 skipped**.
+- Phase 6 adds 20 deterministic cases covering creation, malformed/duplicate rejection, collision/override, unknown→custom resolution, deactivation, advisory safety, global vs bill scope, restart persistence, registry hashes, stale plans, Phase 4 admission/blocking, snapshot immutability, and audit.
+- JavaScript syntax checks over all `src/**/*.js`: passed.
+- Python syntax checks for `app (1).py` and `portal_bridge.py`: passed; Phase 6 changed no Python.
 - `git diff --check`: passed.
 - `npm audit --omit=dev`: **0 vulnerabilities**.
-- Automated testing: completed.
-- Real PDF regression: **NOT RUN** because the named attachments were not present in the workspace filesystem.
+- Reference snapshot SHA-256 remained `b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba`.
 - Live portal testing: **NOT RUN — LIVE PORTAL REQUIRED**.
 
 ## Git
 
 - Branch: `arena/01a0de46-billing-suit`
-- Phase 4 commit: `a061209`
+- Phase 5 commit: `69227b6`
 - PR #1 remains open and must not be merged automatically.
-- Phase 5 commit is pending at the time of this entry.
+- Phase 6 commit is pending at the time of this entry.
 
 ## Stop point
 
-Stop after Phase 5. Do not begin discharge, final bill, consumables production, automatic storage, or Settlement/Reconciliation work.
+Stop after Phase 6. Do not begin discharge, final bill upload, folder automation, production pharmacy/OT extraction, or Settlement/Reconciliation.

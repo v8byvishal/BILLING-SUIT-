@@ -19,6 +19,7 @@ function createEnhancementPlan(bill, rateRepository) {
     unresolved_codes: [],
     warnings: [],
     rule_audit: [],
+    custom_registry: null,
     execution_summary: { executable: [], blocked: [], review_required: [] }
   };
 }

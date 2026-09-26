@@ -51,6 +51,16 @@ The existing Python Selenium executor remains authoritative for procedure search
 - Duplicate aggregation remains separated by semantic section and happens only after Patient Payable exclusion.
 - CN002, CC001, WC001, and CC002 meanings are unchanged.
 
+## Phase 6 custom/local policy
+
+- Reference lookup wins unless a colliding custom record explicitly records `override_authoritative: true`; reference data is never overwritten.
+- Custom resolution is exact-code only. Inactive records resolve as unknown.
+- `FIXED` requires a positive integer and may produce `CUSTOM_VALID`; `MANUAL` and `PER_DAY` remain `REVIEW_REQUIRED` because this phase has no arbitrary formulas or inferred duration mapping.
+- Missing rates remain undefined. A custom fixed-quantity action may be executable without inventing a financial amount.
+- `POSSIBLY_MISSING_CODE` remains an advisory. Reviewing/dismissing it is bill-specific; only explicit Add Custom Code creates a global record.
+- Compound expressions remain unresolved and cannot be converted by description similarity or automatic expansion.
+- Plans record relevant custom-record fingerprints. A material registry change causes `PLAN_STALE` at the Phase 4 adapter boundary.
+
 ## Prohibited scope
 
 No second Selenium engine, selector duplication, credential/login automation, security bypass, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented. Settlement remains isolated under `src/services/settlement/`.

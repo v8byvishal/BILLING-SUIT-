@@ -4,8 +4,8 @@ const { loadBundledReferenceRates, loadRateSource } = require('./rate-list/loade
 const { RateRepository } = require('./rate-list/repository');
 const { evaluateBill } = require('./rules/rule-engine');
 
-function createBundledRateRepository(customEntries = []) {
-  return new RateRepository(loadBundledReferenceRates(), customEntries);
+function createBundledRateRepository(customEntries = [], options = {}) {
+  return new RateRepository(loadBundledReferenceRates(), customEntries, options);
 }
 
 module.exports = { createBundledRateRepository, evaluateBill, loadRateSource, RateRepository };

@@ -34,6 +34,18 @@ function applyRate(entry, rateRepository) {
   const warnings = [...(entry.warnings || [])];
   if (lookup.status === CODE_STATUS.UNKNOWN) status = 'UNKNOWN_CODE';
   else if (lookup.status === CODE_STATUS.INVALID_FORMAT) status = 'REVIEW_REQUIRED';
+  else if (lookup.status === CODE_STATUS.CUSTOM_LOCAL) {
+    const behavior = record?.audit?.quantity_behavior || 'MANUAL';
+    if (behavior === 'FIXED' && Number.isInteger(record.audit.fixed_quantity) && record.audit.fixed_quantity > 0) {
+      entry = { ...entry, quantity: record.audit.fixed_quantity };
+      status = 'CUSTOM_VALID';
+      warnings.push('CUSTOM_FIXED_QUANTITY_APPLIED');
+    } else {
+      status = 'REVIEW_REQUIRED';
+      warnings.push(`CUSTOM_QUANTITY_${behavior}`);
+    }
+    if (rate == null) warnings.push('CUSTOM_RATE_UNDEFINED');
+  }
   else if (rate == null) { status = 'REVIEW_REQUIRED'; warnings.push('RATE_MISSING'); }
   else if (!sourceAuthoritative && lookup.status === CODE_STATUS.VALID) {
     status = 'REVIEW_REQUIRED';
@@ -162,7 +174,7 @@ function evaluateBill(bill, rateRepository) {
     raw_source_context: candidate.raw, parser_decision: candidate.parser_decision,
     status: 'REVIEW_REQUIRED', reason: candidate.reason, rule_id: 'PHASE2_MISSING_CODE_ADVISORY', action: 'REVIEW_REQUIRED'
   });
-  const executableStatuses = new Set(['SOURCE_VERIFIED', 'RULE_VERIFIED']);
+  const executableStatuses = new Set(['SOURCE_VERIFIED', 'RULE_VERIFIED', 'CUSTOM_VALID']);
   for (const entry of plan.entries) {
     const reference = { code: entry.code, quantity: entry.quantity, status: entry.status, source: entry.source, rule_id: entry.rule_id || null, provenance: entry.provenance || [] };
     if (executableStatuses.has(entry.status)) plan.execution_summary.executable.push(reference);
@@ -173,6 +185,8 @@ function evaluateBill(bill, rateRepository) {
     const target = candidate.action === 'REVIEW_REQUIRED' ? plan.execution_summary.review_required : plan.execution_summary.blocked;
     target.push(candidate);
   }
+  const relevantCodes = plan.entries.map((entry) => entry.code).filter(Boolean);
+  plan.custom_registry = rateRepository.registryContext(relevantCodes);
   if (!rateRepository.isFinanciallyAuthoritative()) plan.warnings.push('RATE_SOURCE_UNDEFINED');
   return plan;
 }

@@ -11,6 +11,8 @@ const { createBundledRateRepository, evaluateBill } = require('../services/cghs'
 const { adaptEnhancementPlan } = require('../adapters/legacy-portal/plan-adapter');
 const { LegacyPythonRunner } = require('../adapters/legacy-portal/python-runner');
 const { executeEnhancementPlan } = require('../services/portal/portal-execution-service');
+const { CustomCodeRegistry } = require('../services/custom-codes/custom-code-registry');
+const { createReviewQueue } = require('../services/custom-codes/review-queue');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
@@ -18,6 +20,8 @@ let logger = null;
 let config = null;
 let storageInfo = null;
 let rateRepository = null;
+let customCodeRegistry = null;
+let currentBill = null;
 let currentEnhancementPlan = null;
 const state = createAppState();
 
@@ -29,6 +33,20 @@ function publicConfig() {
     features: config.features,
     version: app.getVersion()
   });
+}
+
+function rebuildRateRepository() {
+  const snapshot = customCodeRegistry.snapshot();
+  rateRepository = createBundledRateRepository(customCodeRegistry.activeRateEntries(), { customRegistrySnapshot: snapshot });
+}
+
+function refreshCurrentPlan() {
+  rebuildRateRepository();
+  if (currentBill) {
+    currentEnhancementPlan = evaluateBill(currentBill, rateRepository);
+    customCodeRegistry.recordPlanUsage(currentEnhancementPlan);
+  }
+  return currentEnhancementPlan;
 }
 
 function registerIpc() {
@@ -46,7 +64,9 @@ function registerIpc() {
     try {
       const bill = await ingestBillPdf(selection.filePaths[0]);
       const enhancementPlan = evaluateBill(bill, rateRepository);
+      currentBill = bill;
       currentEnhancementPlan = enhancementPlan;
+      customCodeRegistry.recordPlanUsage(enhancementPlan);
       state.set('BILL_LOADED');
       logger.info('Bill PDF parsed and deterministic plan prepared', {
         pages: bill.parsing_audit.pages_processed,
@@ -63,14 +83,32 @@ function registerIpc() {
       throw new Error(`Bill could not be parsed: ${error.message}`);
     }
   });
+  ipcMain.handle('review:list', () => currentEnhancementPlan ? createReviewQueue(currentEnhancementPlan) : []);
+  ipcMain.handle('review:record', (_event, decision) => customCodeRegistry.recordReview(decision));
+  ipcMain.handle('custom-codes:list', (_event, filters) => ({ records: customCodeRegistry.list(filters), registry: customCodeRegistry.snapshot() }));
+  ipcMain.handle('custom-codes:create', (_event, input) => {
+    const referenceOnly = createBundledRateRepository();
+    const record = customCodeRegistry.create(input, { referenceLookup: (code) => referenceOnly.lookup(code) });
+    const enhancementPlan = refreshCurrentPlan();
+    return { record, registry: customCodeRegistry.snapshot(), enhancementPlan, reviewQueue: enhancementPlan ? createReviewQueue(enhancementPlan) : [] };
+  });
+  ipcMain.handle('custom-codes:update', (_event, code, input) => {
+    const record = customCodeRegistry.update(code, input); const enhancementPlan = refreshCurrentPlan();
+    return { record, registry: customCodeRegistry.snapshot(), enhancementPlan };
+  });
+  ipcMain.handle('custom-codes:set-active', (_event, code, active, context) => {
+    const record = customCodeRegistry.setActive(code, active, context); const enhancementPlan = refreshCurrentPlan();
+    return { record, registry: customCodeRegistry.snapshot(), enhancementPlan };
+  });
+  ipcMain.handle('custom-codes:audit', (_event, code) => customCodeRegistry.audit(code));
   ipcMain.handle('portal:preview', () => {
     if (!currentEnhancementPlan) throw new Error('Parse a bill before preparing portal actions');
-    return adaptEnhancementPlan(currentEnhancementPlan);
+    return adaptEnhancementPlan(currentEnhancementPlan, { registrySnapshot: customCodeRegistry.snapshot() });
   });
   ipcMain.handle('portal:execute', async () => {
     if (!currentEnhancementPlan) throw new Error('Parse a bill before portal execution');
     logger.info('User requested legacy portal execution; authenticated Chrome CDP session is required');
-    const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner());
+    const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner(), { registrySnapshot: customCodeRegistry.snapshot() });
     logger.info('Portal execution finished', { runId: audit.run_id, status: audit.status, counts: audit.counts });
     return audit;
   });
@@ -121,7 +159,8 @@ async function bootstrap() {
     });
     storageInfo = ensureStorage(storagePath);
     logger = createLogger({ logsDir: path.join(storagePath, 'Logs'), level: config.logging.level, source: 'desktop-main' });
-    rateRepository = createBundledRateRepository();
+    customCodeRegistry = new CustomCodeRegistry(storagePath);
+    rebuildRateRepository();
     logger.info('Application startup', {
       appDir: APP_DIR,
       storagePath,

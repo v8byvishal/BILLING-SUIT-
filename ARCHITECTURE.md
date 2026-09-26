@@ -111,6 +111,23 @@ Aggregation remains scoped by semantic section type after Patient Payable exclus
 
 Synthetic fixtures under `tests/fixtures/bills/` cover production-like structures and do not contain patient data. Named real PDFs were not accessible in the workspace, so real-PDF regression is not claimed.
 
+## Phase 6 review and custom-code boundary
+
+Custom records are stored outside the executable in `Storage/Custom_Codes/registry.json`; lifecycle/review events are append-only JSON Lines in `Storage/Audit/custom-code-audit.jsonl`. Registry writes use same-directory temporary files followed by atomic rename. The immutable bundled reference JSON is never written.
+
+```text
+EnhancementPlan review evidence → bill-specific REVIEWED decision
+                               ↘ explicit ADD CUSTOM CODE
+Storage custom registry → active validated records → existing RateRepository custom layer
+  → EnhancementPlan captures registry revision/hash/relevant fingerprints
+  → Phase 4 adapter compares current relevant fingerprints
+  → PLAN_STALE on material change, otherwise validated action
+```
+
+Resolution is deterministic: reference records win by default; active custom records resolve only by exact code; a colliding custom record requires an explicit audited override. Inactive records are not loaded. `MANUAL` and `PER_DAY` custom quantity behavior remains review-required; only a positive integer `FIXED` definition can produce `CUSTOM_VALID` in this phase. A rate is optional and never fabricated.
+
+The review queue is a projection of the existing EnhancementPlan and shows evidence rather than creating a second plan model. Bill-specific dismiss/review events never become global definitions. The minimal UI exposes review, explicit add, exact text search, edit, deactivate/reactivate, and audit actions.
+
 ## Development and packaging
 
 - Install pinned dependencies: `npm install`

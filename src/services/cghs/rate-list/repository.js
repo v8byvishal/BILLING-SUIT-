@@ -12,7 +12,7 @@ const CODE_STATUS = Object.freeze({
 });
 
 class RateRepository {
-  constructor(rateSource, customEntries = []) {
+  constructor(rateSource, customEntries = [], options = {}) {
     if (!rateSource?.provenance || !Array.isArray(rateSource.records)) throw new Error('Normalized rate source required');
     this.provenance = rateSource.provenance;
     this.index = new Map();
@@ -21,6 +21,7 @@ class RateRepository {
       this.index.set(record.code, record);
     }
     this.custom = new Map();
+    this.customRegistrySnapshot = options.customRegistrySnapshot || null;
     for (const [index, entry] of customEntries.entries()) this.addCustom(entry, index);
     Object.freeze(this);
   }
@@ -40,7 +41,9 @@ class RateRepository {
   lookup(value) {
     const code = normalizeCode(value);
     if (!CODE_FORMAT.test(code)) return Object.freeze({ code, status: CODE_STATUS.INVALID_FORMAT, record: null, rate_source: this.provenance });
-    if (this.custom.has(code)) return Object.freeze({ code, status: CODE_STATUS.CUSTOM_LOCAL, record: this.custom.get(code), rate_source: this.provenance });
+    const custom = this.custom.get(code);
+    if (this.index.has(code) && !custom?.audit?.override_authoritative) return Object.freeze({ code, status: CODE_STATUS.VALID, record: this.index.get(code), rate_source: this.provenance });
+    if (custom) return Object.freeze({ code, status: CODE_STATUS.CUSTOM_LOCAL, record: custom, rate_source: this.provenance });
     if (this.index.has(code)) return Object.freeze({ code, status: CODE_STATUS.VALID, record: this.index.get(code), rate_source: this.provenance });
     return Object.freeze({ code, status: CODE_STATUS.UNKNOWN, record: null, rate_source: this.provenance });
   }
@@ -62,6 +65,18 @@ class RateRepository {
       components
     });
     return Object.freeze({ status: components[0]?.lookup.status || CODE_STATUS.INVALID_FORMAT, components });
+  }
+
+  registryContext(codes = []) {
+    if (!this.customRegistrySnapshot) return null;
+    const relevant_record_hashes = Object.fromEntries([...new Set(codes.map(normalizeCode).filter((code) => CODE_FORMAT.test(code)))].sort()
+      .map((code) => [code, this.customRegistrySnapshot.record_hashes?.[code] || null]));
+    return Object.freeze({
+      schema_version: this.customRegistrySnapshot.schema_version,
+      revision: this.customRegistrySnapshot.revision,
+      hash: this.customRegistrySnapshot.hash,
+      relevant_record_hashes: Object.freeze(relevant_record_hashes)
+    });
   }
 
   isFinanciallyAuthoritative() {

@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 
-const EXECUTABLE_STATUSES = new Set(['SOURCE_VERIFIED', 'RULE_VERIFIED']);
+const EXECUTABLE_STATUSES = new Set(['SOURCE_VERIFIED', 'RULE_VERIFIED', 'CUSTOM_VALID']);
 const BLOCKED_STATUSES = new Set(['UNKNOWN_CODE', 'UNRESOLVED_COMPOUND', 'RULE_UNDEFINED', 'REVIEW_REQUIRED', 'INVALID_FORMAT']);
 const PRIORITY = Object.freeze({ CC001: 1, WC001: 2, CN002: 3, CC002: 4 });
 
@@ -63,8 +63,23 @@ function sortActions(actions) {
   return actions.sort((a, b) => (PRIORITY[a.code] || 100) - (PRIORITY[b.code] || 100) || a.code.localeCompare(b.code) || a.action_id.localeCompare(b.action_id));
 }
 
+function assertPlanRegistryCurrent(plan, currentSnapshot) {
+  const context = plan?.custom_registry;
+  if (!context || !currentSnapshot) return;
+  const staleCodes = Object.entries(context.relevant_record_hashes || {})
+    .filter(([code, plannedHash]) => (currentSnapshot.record_hashes?.[code] || null) !== plannedHash)
+    .map(([code]) => code);
+  if (staleCodes.length) {
+    const error = new Error(`PLAN_STALE: custom code registry changed for ${staleCodes.join(', ')}`);
+    error.code = 'PLAN_STALE';
+    error.stale_codes = staleCodes;
+    throw error;
+  }
+}
+
 function adaptEnhancementPlan(plan, options = {}) {
   if (!plan || !Array.isArray(plan.entries) || !plan.plan_version) throw new Error('Valid Phase 3 EnhancementPlan required');
+  assertPlanRegistryCurrent(plan, options.registrySnapshot);
   const blocked = [];
   const actions = [];
   for (const [index, entry] of plan.entries.entries()) {
@@ -79,6 +94,7 @@ function adaptEnhancementPlan(plan, options = {}) {
     run_id: options.runId || crypto.randomUUID(),
     requested_at: options.timestamp || new Date().toISOString(),
     plan_version: plan.plan_version,
+    custom_registry: plan.custom_registry || null,
     bill: plan.bill || {},
     actions: sortActions(actions),
     blocked,
@@ -86,4 +102,4 @@ function adaptEnhancementPlan(plan, options = {}) {
   };
 }
 
-module.exports = { BLOCKED_STATUSES, EXECUTABLE_STATUSES, adaptEnhancementPlan, validateExecutable };
+module.exports = { BLOCKED_STATUSES, EXECUTABLE_STATUSES, adaptEnhancementPlan, assertPlanRegistryCurrent, validateExecutable };

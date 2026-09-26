@@ -34,6 +34,12 @@ h1 { margin:-2px 0 0; font-size:29px; letter-spacing:-.04em; }
 table { width:100%; border-collapse:collapse; font-size:12px; }
 th,td { padding:10px 14px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
 th { color:var(--muted); background:#f8f9fa; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+td button { margin:2px 4px 2px 0; border:1px solid var(--line); border-radius:5px; padding:5px 8px; background:#fff; color:var(--blue); cursor:pointer; }
+.registry-form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:16px 20px; border-top:1px solid var(--line); }
+.registry-form[hidden] { display:none; }
+.registry-form input,.registry-form select,#registrySearch { min-width:0; border:1px solid var(--line); border-radius:6px; padding:8px; background:#fff; }
+.registry-form label { display:flex; align-items:center; gap:6px; }
+pre { margin:0; padding:16px 20px; overflow:auto; max-height:260px; border-top:1px solid var(--line); background:#f8f9fa; font-size:11px; }
 .future h3 { margin:0; font-size:18px; }
 .future > p { margin:5px 0 16px; color:var(--muted); }
 .areas { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }

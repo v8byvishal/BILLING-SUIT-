@@ -9,7 +9,9 @@ const STORAGE_FOLDERS = Object.freeze([
   'Supporting_Sections',
   'Logs',
   'Failed',
-  'Reports'
+  'Reports',
+  'Custom_Codes',
+  'Audit'
 ]);
 
 function isInside(candidate, parent) {

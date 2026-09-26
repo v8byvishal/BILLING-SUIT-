@@ -1,6 +1,12 @@
 'use strict';
 
 let portalPreview = null;
+let currentReviewQueue = [];
+let selectedReview = null;
+
+function button(label, onClick) {
+  const element = document.createElement('button'); element.type = 'button'; element.textContent = label; element.addEventListener('click', onClick); return element;
+}
 
 function text(id, value) { document.getElementById(id).textContent = value; }
 
@@ -56,6 +62,7 @@ async function selectAndParseBill() {
     text('excludedSections', bill.excluded_sections.length);
     text('parseMessage', `${bill.sections.length} primary section(s), ${bill.parsing_audit.compound_expressions.length} compound expression(s), ${bill.bed_details.length} Bed Detail row(s), ${result.enhancementPlan.entries.length} plan entry/entries. No portal operation was performed.`);
     renderPlan(result.enhancementPlan);
+    await loadReviewQueue();
     text('appState', 'BILL_LOADED');
   } catch (error) {
     text('parseStatus', 'ERROR');
@@ -64,6 +71,74 @@ async function selectAndParseBill() {
   } finally {
     button.disabled = false;
   }
+}
+
+async function loadReviewQueue() {
+  currentReviewQueue = await window.vnext.listReviewQueue();
+  const body = document.getElementById('reviewRows'); body.replaceChildren();
+  for (const record of currentReviewQueue) {
+    const row = document.createElement('tr');
+    for (const value of [record.code || record.raw_text, `${record.section || '—'} / ${record.source_page || '—'}`, displayNumber(record.quantity), record.status, record.reason]) {
+      const cell = document.createElement('td'); cell.textContent = value || '—'; row.appendChild(cell);
+    }
+    const actions = document.createElement('td');
+    actions.append(button('Review', () => window.alert(JSON.stringify(record, null, 2))));
+    if (record.available_actions.includes('ADD_CUSTOM_CODE')) actions.append(button('Add custom', () => {
+      selectedReview = record; document.getElementById('customCode').value = record.code || ''; document.getElementById('customCodeForm').hidden = false;
+    }));
+    actions.append(button('Dismiss', async () => {
+      const operator = window.prompt('Operator identifier'); if (!operator) return;
+      await window.vnext.recordReviewDecision({ action: 'REVIEWED', code: record.code, reason: 'DISMISSED_BY_OPERATOR', source: record.raw_text || record.reason, operator, bill_context: { review_id: record.review_id }, review_record: record });
+      row.remove();
+    }));
+    row.appendChild(actions); body.appendChild(row);
+  }
+  text('reviewCount', `${currentReviewQueue.length} open`);
+  document.getElementById('reviewView').hidden = currentReviewQueue.length === 0;
+}
+
+async function loadRegistry() {
+  const result = await window.vnext.listCustomCodes({ query: document.getElementById('registrySearch').value });
+  text('registryVersion', `Persistent local records · revision ${result.registry.revision} · ${result.registry.hash.slice(0, 12)}`);
+  const body = document.getElementById('registryRows'); body.replaceChildren();
+  for (const record of result.records) {
+    const row = document.createElement('tr');
+    for (const value of [record.code, record.description, record.override_authoritative ? 'CUSTOM OVERRIDE' : 'CUSTOM/LOCAL', record.active ? 'ACTIVE' : 'INACTIVE', record.source, record.updated_at]) {
+      const cell = document.createElement('td'); cell.textContent = value || '—'; row.appendChild(cell);
+    }
+    const actions = document.createElement('td');
+    actions.append(button('Edit', async () => {
+      const description = window.prompt('Description', record.description); if (!description) return;
+      const reason = window.prompt('Reason for update'); const source = window.prompt('Source / reference', record.source); const operator = window.prompt('Operator identifier');
+      if (!reason || !source || !operator) return;
+      await window.vnext.updateCustomCode(record.code, { description, reason, source, operator, quantity_behavior: record.quantity_behavior, fixed_quantity: record.fixed_quantity, rate: record.rate, unit: record.unit, notes: record.notes }); await loadRegistry();
+    }));
+    actions.append(button(record.active ? 'Deactivate' : 'Reactivate', async () => {
+      const reason = window.prompt('Reason'); const source = window.prompt('Source / reference', record.source); const operator = window.prompt('Operator identifier'); if (!reason || !source || !operator) return;
+      await window.vnext.setCustomCodeActive(record.code, !record.active, { reason, source, operator }); await loadRegistry(); await loadReviewQueue();
+    }));
+    actions.append(button('Audit', async () => { const audit = await window.vnext.getCustomCodeAudit(record.code); const output = document.getElementById('customAudit'); output.textContent = JSON.stringify(audit, null, 2); output.hidden = false; }));
+    row.appendChild(actions); body.appendChild(row);
+  }
+}
+
+async function saveCustomCode(event) {
+  event.preventDefault();
+  const behavior = document.getElementById('customQuantityBehavior').value;
+  const rateText = document.getElementById('customRate').value;
+  try {
+    const result = await window.vnext.createCustomCode({
+      code: document.getElementById('customCode').value, description: document.getElementById('customDescription').value,
+      quantity_behavior: behavior, fixed_quantity: behavior === 'FIXED' ? Number(document.getElementById('customFixedQuantity').value) : null,
+      reason: document.getElementById('customReason').value, source: document.getElementById('customSource').value,
+      operator: document.getElementById('customOperator').value, rate: rateText === '' ? null : Number(rateText),
+      override_authoritative: document.getElementById('customOverride').checked,
+      bill_context: selectedReview ? { review_id: selectedReview.review_id } : null
+    });
+    document.getElementById('customCodeForm').reset(); document.getElementById('customCodeForm').hidden = true; selectedReview = null;
+    if (result.enhancementPlan) renderPlan(result.enhancementPlan);
+    await loadRegistry(); await loadReviewQueue();
+  } catch (error) { window.alert(error.message); }
 }
 
 async function preparePortal() {
@@ -109,6 +184,10 @@ async function initialize() {
     document.getElementById('selectBill').addEventListener('click', selectAndParseBill);
     document.getElementById('preparePortal').addEventListener('click', preparePortal);
     document.getElementById('executePortal').addEventListener('click', executePortal);
+    document.getElementById('customCodeForm').addEventListener('submit', saveCustomCode);
+    document.getElementById('cancelCustomCode').addEventListener('click', () => { document.getElementById('customCodeForm').hidden = true; selectedReview = null; });
+    document.getElementById('registrySearch').addEventListener('input', loadRegistry);
+    await loadRegistry();
     await window.vnext.reportRendererReady();
   } catch (error) {
     text('readyStatus', 'Startup error');

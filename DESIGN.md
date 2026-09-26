@@ -14,4 +14,6 @@ The shell displays product identity, application/Storage/environment readiness, 
 
 The Phase 4 controls provide only portal-action preview, explicit confirmation, execution status, verification counts, and structured audit output. They do not handle credentials or login.
 
-Phase 5 adds no UI. Parser hardening appears through the existing plan/audit contract: executable, blocked, review-required, source evidence, and reasons remain inspectable without creating dashboards or unrelated workflow screens. Custom-rate administration, settlement, discharge, final composition, and automatic folder processing remain absent.
+Phase 5 parser hardening appears through the existing plan/audit contract: executable, blocked, review-required, source evidence, and reasons remain inspectable.
+
+Phase 6 adds two compact work areas: an Enhancement Review evidence table with Review/Add Custom/Dismiss actions, and a Custom Code Registry with exact-text search, edit, deactivate/reactivate, and audit controls. Custom overrides are visibly labeled and there is no bulk/automatic approval. Settlement, discharge, final composition, and automatic folder processing remain absent.

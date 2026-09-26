@@ -8,7 +8,7 @@
 | 3 | CGHS rate-source layer and deterministic rule engine | Implemented; awaiting review, official rate source, and real-bill fixtures |
 | 4 | Portal enhancement automation | Complete; deterministic mocks passed, live validation requires authenticated portal |
 | 5 | Production PDF regression, parser accuracy hardening, and enhancement validation | Complete with synthetic fixtures; real PDFs unavailable to workspace |
-| 6 | Final bill extraction and composition | Not started |
+| 6 | Review queue, custom/unslotted code registry, and controlled overrides | Complete; deterministic persistence/staleness tests passed |
 | 7 | Storage, recovery, logs, auditability hardening | Not started |
 | 8 | Performance and reliability optimization | Not started |
 | 9 | EXE packaging/deployment hardening | Not started |
