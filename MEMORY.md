@@ -2,83 +2,109 @@
 
 ## Current phase
 
-**Phase 2 — Bill Ingestion + PDF Parser + Normalized Bill Model**
+**Phase 3 — CGHS Rate List + Deterministic Rule Engine**
 
-Implementation is complete for review. No real hospital bill PDFs were available in the repository/session, so real-layout accuracy remains unvalidated. The parser is not production-ready and does not claim 100% accuracy.
+Implementation is complete for review. It produces an internal deterministic `EnhancementPlan`; it has no portal adapter and performs no live operation. Official rate-list authority and real-bill validation remain unresolved, so the result is not production-ready and does not claim complete CGHS correctness.
 
-## Completed work
+## Rate source actually used
 
-- Added local PDF path/readability/signature/size validation and page-aware text extraction with `pdfjs-dist`.
-- Preserved source file identity, SHA-256, raw page text, line content, and one-based page numbers.
-- Added semantic section segmentation with explicit start/end/content and cross-page state.
-- Added source metadata, patient/admission/billing field extraction without fabricated defaults.
-- Added service item extraction with source section/page/line/raw context.
-- Added purely syntactic single/compound code normalization.
-- Added exact-expression, same-section primary aggregation with occurrence references.
-- Added structural Bed Details extraction only; no ward/ICU calculations.
-- Added semantic Patient Payable context and nested-section exclusion.
-- Added practical parsing audit data and rejected-token reasons.
-- Added minimal Select PDF → Parsing → Result/status UI and controlled preload IPC.
-- Added a documentation-only future Settlement/Reconciliation boundary.
+The only available repository rate data was `window.MASTER_CGHS` embedded in `CGHS_Billing_Suite_Pro.html`:
 
-## Parser modules created
+- Extracted records: **1,998**
+- Snapshot: `src/services/cghs/data/hfos-reference-rates.json`
+- Source kind: `HFOS_EMBEDDED_REFERENCE_SNAPSHOT`
+- Authority: **`RATE_SOURCE_UNDEFINED`**
+- Version/effective date: unavailable
+- Source HTML SHA-256: `40152488c6d8eab690afcd46e940ea1c9fcb34e4f50598afb520e9086f822e5f`
+- Extracted data SHA-256: `b596cdaf7b70787bd04a2a26d61bda5110de5de5160411152a6a21c52aeb3838`
 
-`src/services/bill-ingestion/`:
+No standalone CGHS rate PDF/CSV/XLS/XLSX or official provenance was available. The snapshot is never labeled official. Lookups expose its rate as reference evidence, but financial `amount` remains null while authority is undefined. Unit tests use a clearly synthetic `TEST_ONLY_AUTHORITY` fixture to verify authoritative amount calculation mechanics; it is not production data.
 
-- `pdf-loader.js`
-- `page-parser.js`
-- `section-detector.js`
-- `field-parser.js`
-- `code-normalizer.js`
-- `compound-code-parser.js`
-- `bed-details-parser.js`
-- `aggregator.js`
-- `normalized-model.js`
-- `bill-parser.js`
-- `index.js`
+## Rate modules created
 
-## Normalized Bill Model
+`src/services/cghs/rate-list/`:
 
-```text
-BillDocument
-├── model_version
-├── source { file_path, file_name, byte_size, sha256 }
-├── metadata
-├── patient
-├── admission
-├── billing
-├── pages[] { page_number, raw_text, lines[] }
-├── sections[]                 # primary only
-│   └── items[]
-├── items[]                    # primary flattened items only
-├── aggregates[]               # primary exact-expression aggregation only
-├── bed_details[]
-├── excluded_sections[]        # Patient Payable hierarchy + excluded items
-└── parsing_audit
-```
+- `loader.js` — local JSON loading
+- `normalizer.js` — deterministic code/rate normalization
+- `validator.js` — explicit authority/provenance and checksum validation
+- `repository.js` — indexed lookups, statuses, conflicts, custom/local separation
 
-Unavailable fields remain `null`. Excluded Patient Payable items never enter primary `items` or `aggregates`, but remain traceable under `excluded_sections` and audit records.
+Code classifications:
 
-## Compound-code behavior
+- `VALID`
+- `UNKNOWN`
+- `UNRESOLVED_COMPOUND`
+- `CUSTOM/LOCAL`
+- `INVALID_FORMAT`
 
-- Preserves `raw_code_expression`.
-- Produces a whitespace-normalized expression and slash-separated syntactic components.
-- Preserves base token and `+` qualifier tokens separately.
-- Labels qualifier semantics such as `+L` as `RULE_UNDEFINED` and interpretation as `NOT_INFERRED`.
-- Does not perform CGHS rate-list validation or map `B068+L` to an invented authoritative code.
+Duplicate/conflicting source records throw an error instead of selecting silently.
 
-## Patient Payable behavior
+## Custom/local mechanism
 
-- Detects a `Patient Payable` semantic parent marker and closes it at `Patient Payable Total`.
-- Carries `PATIENT_PAYABLE` context across nested headings/pages rather than excluding a page number.
-- Keeps primary `IP_PHARMACY` and Patient Payable `IP_PHARMACY` as distinct section objects.
-- Excludes Patient Payable items from the flattened primary dataset and aggregation.
+Custom entries remain in a separate index and require reason, creator, and timestamp audit fields. A custom code colliding with source data is refused unless audit explicitly approves `override_authoritative: true`. Source records remain intact. No administration UI was added.
+
+## Rule modules created
+
+`src/services/cghs/rules/`:
+
+- `room-evidence.js`
+- `cn002.js`
+- `cc001.js`
+- `wc001.js`
+- `cc002.js`
+- `rule-engine.js`
+
+Also created:
+
+- `src/services/cghs/enhancement-plan.js`
+- `src/services/cghs/index.js`
+
+## Exact deterministic rules implemented
+
+- **CN002 / `CN002_ROOM_BED`:** ICU evidence rows × 3 plus supported ward evidence rows × 2.
+- **CC001 / `CC001_ICU_ROOM_RENT`:** count applicable ICU evidence rows.
+- **WC001 / `WC001_WARD_ROOM_RENT`:** count applicable supported ward evidence rows.
+- **CC002 / `CC002_OXYGEN_ROW`:** oxygen HALF DAY/12 hours = 12; FULL DAY/24 hours = 24; unqualified oxygen = legacy single unit 1; simultaneous HALF and FULL = `REVIEW_REQUIRED`.
+
+Structured primary Bed Details is preferred to duplicate Room Rent text evidence. Recognized ICU categories: ICU, CCU, PICU, MICU. Recognized ward categories: AC Multibeds, Single, General Ward, explicit Ward. HDU/unknown categories are not guessed; they withhold room-derived quantities as `REVIEW_REQUIRED`.
+
+Raw CN002, CC001, and WC001 are `REJECTED_BY_RULE` and cannot add to derived quantities. Raw C002/CC002 is never directly counted: oxygen-context rows are evaluated by CC002 and non-oxygen rows are rejected. All results/rejections include machine-readable provenance, rule IDs, inputs, source page/section/context, warnings, and actions.
+
+## EnhancementPlan
+
+The plan contains:
+
+- bill/source identity
+- rate-source provenance
+- direct and rule-derived entries
+- quantity/rate/amount evidence
+- categorical statuses
+- rejected candidates
+- Patient Payable exclusions
+- unknown codes
+- unresolved compound codes
+- warnings
+- full rule audit
+
+Amounts are computed only for explicitly authoritative test/source data or explicit custom/local values. The bundled unverified snapshot cannot produce financial amounts.
+
+## Compound behavior
+
+Phase 3 consumes Phase 2 components without reparsing source text. It looks up each syntactic base token, preserves the raw expression, and retains qualifier tokens. Multi-component or qualified forms such as `B068+L / B075+L / B126` remain `UNRESOLVED_COMPOUND` / `RULE_UNDEFINED`. No `+L` meaning, component combination, or rate sum is invented.
+
+## Patient Payable status
+
+Patient Payable remains semantically excluded. Excluded section items become `EXCLUDED_BY_SECTION` audit records and never enter direct rate candidates, room rules, oxygen rules, quantities, or amounts. Primary IP Pharmacy and Patient Payable IP Pharmacy remain separate.
+
+## Minimal UI
+
+The existing PDF operation now parses once and evaluates once. A small read-only table shows code, quantity, rate evidence, amount, source/rule, and status. It visibly shows `RATE_SOURCE_UNDEFINED`. No portal, custom-rate administration, settlement, or final-composition controls were added.
 
 ## Files modified
 
-- `ARCHITECTURE.md`, `RULES.md`, `PHASES.md`, `MEMORY.md`
-- `package.json`, `package-lock.json`
-- `src/desktop/main.js`, `src/desktop/preload.js`
+- `ARCHITECTURE.md`, `RULES.md`, `PHASES.md`, `DESIGN.md`, `MEMORY.md`
+- `src/desktop/main.js`
+- `src/services/bill-ingestion/bed-details-parser.js` (adds semantic context/exclusion flags to parsed bed evidence)
 - `src/ui/index.html`, `src/ui/renderer.js`, `src/ui/styles.css`
 
 ## Legacy files intentionally untouched
@@ -86,57 +112,58 @@ Unavailable fields remain `null`. Excluded Patient Payable items never enter pri
 - `app (1).py`
 - `CGHS_Billing_Suite_Pro.html`
 - root `main.js` and root `preload.js`
-- all CGHS rates, formulas, parser calculations, Selenium/CDP behavior, locators, retries, and historical reports
+- all legacy Selenium/CDP behavior, portal locators, retries, and enhancement workflow
+- existing settlement implementation/reports and `src/services/settlement/README.md`
 - `PRD.md`
 
-No CN002, WC001, ICU, ward, oxygen, rate, enhancement, portal, pharmacy attachment, consumable attachment, final composition, missing-code, or settlement calculation was implemented.
+## Real PDFs tested
 
-## Settlement/Reconciliation evidence and boundary
-
-Inspected the repository settlement implementation/reference in `CGHS_Billing_Suite_Pro.html` plus `SETTLEMENT_MODULE_REPORT.md`, `MATCHING_ENGINE_REPORT.md`, `ROBUST_SETTLEMENT_REPORT.md`, `ADVANCED_SETTLEMENT_REPORT.md`, `CASE_GROUP_ENGINE_REPORT.md`, `VALIDATION_REPORT.md`, and related analysis reports. No separately named new Claims Reconciliation/Bill-UHID Mapping document file was present in the checkout; the Phase 2 instruction itself supplied Registration-ID, IP-first/OP-fallback, multiple-value/status, traceability, count, audit, and validation requirements.
-
-`src/services/settlement/README.md` preserves a future service boundary. The bill parser does not normalize Registration IDs, query IP/OP data, match claims, enrich Bill No/UHID, set `MULTIPLE`/`UNMATCHED`, or invoke/duplicate the HFOS settlement engine.
+**`REAL_FIXTURES_UNAVAILABLE`.** No PDFs exist in the repository/session. Specifically, `38222.pdf`, `40343.pdf`, `39951.pdf`, and `40332.pdf` were not accessible. No patient-specific expectation was hardcoded and no fabricated real-PDF claim was made. The existing deterministic synthetic PDF and structured-text fixtures remain clearly labeled synthetic.
 
 ## Tests actually run
 
 Command: `npm test`
 
-**Result: 15 passed, 0 failed.** Coverage includes:
+**Result: 25 passed, 0 failed.** This includes all Phase 1/2 regression tests plus Phase 3 tests for:
 
-- synthetic two-page local PDF creation, extraction, page preservation, parser handoff, and source-page checks;
-- normalized model metadata, sections, items, traceability, and Bed Details;
-- primary IP Pharmacy included versus Patient Payable IP Pharmacy excluded;
-- excluded quantity not merged into primary aggregation;
-- exact-expression duplicate occurrence retention and numeric quantity aggregation;
-- `B068+L / B075+L / B126` preservation/components/audit with no invented semantics;
-- plus-sign expression accepted syntactically rather than rejected solely for `+`;
-- PDF line reconstruction and clear missing/non-PDF failures;
-- Phase 1 configuration, state, logger, and external Storage regressions.
+- 1,998-record snapshot count/checksum and undefined authority;
+- known, unknown, malformed, missing-rate, compound, custom/local, duplicate/conflict lookups;
+- undefined source withholding financial amounts;
+- CN002, CC001, WC001 derivation and provenance;
+- oxygen HALF DAY, FULL DAY, ambiguous phrases;
+- raw special-code rejection/no double count;
+- Patient Payable exclusion;
+- direct duplicate aggregation;
+- unknown/custom plan entries;
+- compound component lookups without invented semantics;
+- HDU ambiguity review;
+- repeat evaluation producing deep-identical output.
 
 Additional commands:
 
-- JavaScript syntax checks over all `src/**/*.js`: passed.
+- JavaScript syntax checks over `src/**/*.js`: passed.
 - `npm audit --omit=dev`: 0 production dependency vulnerabilities.
-- `git diff --check`: passed before implementation commit.
+- `git diff --check`: passed before the implementation commit.
 
-## Real bills tested
+## Settlement/Reconciliation boundary
 
-**None.** There are no PDF files in the repository/session. `tests/integration/pdf-ingestion.test.js` creates a deterministic synthetic PDF and is explicitly not represented as a real-bill regression. `tests/fixtures/bill-text/semantic-bill.json` is synthetic structured text used for deterministic semantic regressions.
+Repository settlement reports and the implementation embedded in `CGHS_Billing_Suite_Pro.html` were inspected again. No separately named new reconciliation document file was present; the supplied phase instructions remain the available Registration-ID/IP-first/OP-fallback specification. Settlement remains isolated in `src/services/settlement/` and was not imported, duplicated, modified, or implemented in the CGHS rule engine.
 
-## Known limitations
+## Unresolved issues
 
-- Actual hospital PDF layouts, text ordering, wrapped/tabular rows, fonts, scanned PDFs/OCR, and all real section variants remain unvalidated.
-- Text extraction does not perform OCR.
-- Section and field recognition is conservative and marker/regex based; unfamiliar headings remain undetected.
-- Item column extraction cannot reliably reconstruct every visually tabular PDF without real fixtures.
-- Compound parsing is syntactic only; `+L` remains undefined.
-- Aggregation is intentionally narrow: exact normalized expression + same section + numeric quantities only.
-- Date values are preserved as source strings; no date/business-duration calculations occur.
+- Official current CGHS rate source, version, effective date, category, and alias provenance are unavailable.
+- The embedded source has no WC001 record; derived WC001 therefore remains explicitly unknown under that snapshot.
+- Real bills and real parser/rule interaction remain unvalidated.
+- HDU and unsupported room categories require an authoritative classification decision.
+- Compound `+L` semantics remain undefined.
+- Scanned/OCR bills remain unsupported.
+- Portal amount semantics are intentionally not addressed.
 - The Phase 1 Electron runtime smoke-test environment blocker remains unresolved.
 
 ## Git state
 
 - Branch: `arena/01a0de46-billing-suit`
+- Phase 3 implementation commit: `da0b0bd`
 - Phase 2 implementation commit: `dc9af61`
 - Phase 1 foundation commit: `a5915fd`
 - Phase 0 PRD commit: `ffb485b`
@@ -144,4 +171,4 @@ Additional commands:
 
 ## Next phase
 
-**Phase 3 — authoritative CGHS rate list + deterministic rule engine**, only after human review and separate instructions. Phase 3 has not started. Real sanitized bill PDFs should be supplied before treating Phase 2 parsing behavior as a validated baseline.
+**Phase 4 — Enhancement Automation**, only after human review and separate instructions. Phase 4 has not started. No portal connection, Selenium/CDP change, or enhancement submission is present in Phase 3.
