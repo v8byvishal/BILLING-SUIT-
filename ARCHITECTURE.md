@@ -88,15 +88,18 @@ Compound syntax is consumed from Phase 2. Each base component is looked up, but 
 
 The Electron renderer receives the plan through the existing controlled PDF operation and shows a small diagnostics table. No rate-editing UI, portal operation, Registration-ID matching, or Settlement/Reconciliation processing is exposed.
 
-## Future integration boundary
-
-Later approved phases may connect:
+## Phase 4 legacy portal boundary
 
 ```text
-Desktop UI → Application Services → CGHS Enhancement Engine → Portal Adapter
+EnhancementPlan → plan-adapter.js safety gate → portal-execution-service.js
+  → python-runner.js JSON child process → portal_bridge.py
+  → existing BatchAutomationThread / TreatmentPlanOrchestrator
+  → Chrome CDP 127.0.0.1:9222 → verified portal rows → execution audit
 ```
 
-`src/services/` and `src/adapters/` are reserved boundaries, not implementations. `app (1).py` remains the untouched legacy baseline and is not loaded by the shell.
+The adapter passes structured code, final quantity, evidence, rule/reason, classification, derived flag, and audit metadata only. Unsafe and excluded records remain in the audit and never invoke Selenium. The bridge contains no selectors or CGHS rules: it synchronously invokes the existing executor in `app (1).py`. Minimal additive instrumentation records per-action `EXECUTED`, `ALREADY_PRESENT`, or `FAILED` outcomes while preserving legacy PyQt signals, retries, diagnostics, reconciliation, and final audit behavior.
+
+Electron exposes allowlisted preview and explicit execute IPC calls. The UI shows executable/blocked counts, requires confirmation, reports verification/status, and renders the structured audit. It never handles credentials or login. Settlement/Reconciliation is not imported.
 
 ## Development and packaging
 

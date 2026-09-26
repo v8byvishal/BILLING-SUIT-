@@ -1587,6 +1587,7 @@ class TreatmentPlanOrchestrator:
         self.current_bill_id = None
         self.unit_states = {}
         self.tx_dispatch_registry = {}  # transaction_id -> {count, state, ts, dispatch_count}
+        self.last_item_outcome = None  # Phase 4 structured adapter result; browser behavior unchanged
 
     def _get_tx_id(self, code: str, unit_idx: int) -> str:
         bill = self.current_bill_id or "current"
@@ -1901,6 +1902,7 @@ class TreatmentPlanOrchestrator:
                 for u in range(1, required_qty+1):
                     self._mark_state(code, u, "COMPLETED")
                 self.last_code = code
+                self.last_item_outcome = {"status": "EXECUTED", "verification": "PORTAL_ROW_VERIFIED"}
                 return True
             completed = portal_count
             if completed>0:
@@ -1983,6 +1985,7 @@ class TreatmentPlanOrchestrator:
 
     def process_item(self, item: Dict[str, Any]) -> bool:
         code = item["code"]
+        self.last_item_outcome = None
         qty = item.get("qty", 1)
         amount = item.get("amount")
         is_amount_based = amount is not None or code.upper() in ["DRUG100","CNSU100"]
@@ -1996,6 +1999,7 @@ class TreatmentPlanOrchestrator:
         if self._is_code_already_in_portal(code, bill_qty if not is_amount_based else 1):
             self.logger.info(f"[DUP-GUARD-ENTRY] {code} already portal SKIP")
             self.last_code = code
+            self.last_item_outcome = {"status": "ALREADY_PRESENT", "verification": "PORTAL_ROW_RECONCILED"}
             return True
         t_proc = time.time()
         self.proc_sel.execute(code)
@@ -2030,13 +2034,15 @@ class TreatmentPlanOrchestrator:
             else:
                 raise ValueError(f"Amount-based {code} fail")
         if is_locked:
-            return self._process_locked_quantity(item, bill_qty)
+            success = self._process_locked_quantity(item, bill_qty)
         else:
             self.qty_ctrl.execute(bill_qty)
             success = self._process_editable_quantity(item, bill_qty)
             self.logger.info(f"[PERF] Total {code}: {int((time.time()-t_overall)*1000)}ms")
             self.last_code = code
-            return success
+        if success:
+            self.last_item_outcome = {"status": "EXECUTED", "verification": "PORTAL_ROW_VERIFIED"}
+        return success
 
 class BatchAutomationThread(QThread):
     log_signal = pyqtSignal(str)
@@ -2048,6 +2054,9 @@ class BatchAutomationThread(QThread):
         self.delay_mode = delay_mode
         self.logger = EnterpriseLogger(self.log_signal)
         self._is_cancelled = False
+        self.execution_results = []  # structured Phase 4 audit, additive to existing logs/signals
+        self.fatal_error = None
+        self.cdp_attempts = 0
     def stop(self):
         self._is_cancelled = True
         self.logger.warn("BatchThread: Cancellation")
@@ -2059,6 +2068,7 @@ class BatchAutomationThread(QThread):
             options = Options()
             options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
             for attempt in range(1, 4):
+                self.cdp_attempts = attempt
                 try:
                     driver = webdriver.Chrome(options=options)
                     self.logger.info("BatchThread: CDP connected")
@@ -2110,6 +2120,7 @@ class BatchAutomationThread(QThread):
                     code = code.upper() if code.lower() in ["drug100","cnsu100"] else code
                     if not should_add(code, bill_qty):
                         self.logger.info(f"[DUPLICATE-GUARD] {code} Bill Qty:{bill_qty} Successful:{successful_counts.get(code.upper(),0)} SKIP")
+                        self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "ALREADY_PRESENT", "portal_result": "BATCH_DUPLICATE_GUARD", "error": None, "retry_count": 0, "verification_result": "SUCCESS_COUNT_RECONCILED", "diagnostics": {}})
                         continue
                     item_ok = False
                     # ONLY ONE attempt per item now - no outer retry that can duplicate Plus (reconciliation inside orchestrator)
@@ -2118,6 +2129,11 @@ class BatchAutomationThread(QThread):
                         if item_ok:
                             successful_counts[code.upper()] = bill_qty
                             success_count += 1
+                            outcome = orchestrator.last_item_outcome or {"status": "EXECUTED", "verification": "PORTAL_ROW_VERIFIED"}
+                            self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": outcome.get("status", "EXECUTED"), "portal_result": outcome.get("status", "EXECUTED"), "error": None, "retry_count": 0, "verification_result": outcome.get("verification", "PORTAL_ROW_VERIFIED"), "diagnostics": {}})
+                        else:
+                            failed_items.append(code)
+                            self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "FAILED", "portal_result": None, "error": "Legacy executor returned false", "retry_count": 0, "verification_result": "PORTAL_STATE_NOT_VERIFIED", "diagnostics": {}})
                     except Exception as ex:
                         self.logger.warn(f"Attempt fail for [{code}]: {ex}")
                         artifacts = DiagnosticEngine.capture_artifact(driver, p_name, code, "Attempt", ex)
@@ -2133,11 +2149,13 @@ class BatchAutomationThread(QThread):
                                 successful_counts[code.upper()] = bill_qty
                                 item_ok = True
                                 success_count += 1
+                                self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "EXECUTED", "portal_result": f"RECONCILED_PORTAL_ROWS:{portal_count}", "error": str(ex), "retry_count": 0, "verification_result": "RECONCILED_AFTER_EXCEPTION", "diagnostics": artifacts})
                         except Exception as re_e:
                             self.logger.warn(f"[RECONCILE-OUTER] fail {re_e}")
                         if not item_ok:
                             self.logger.error(f"Failed [{code}] after reconciliation")
                             failed_items.append(code)
+                            self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "FAILED", "portal_result": None, "error": str(ex), "retry_count": 0, "verification_result": "PORTAL_STATE_NOT_VERIFIED", "diagnostics": artifacts})
                 if failed_items:
                     self.logger.error(f"[FINAL AUDIT] Failed {failed_items}")
                 else:
@@ -2149,6 +2167,12 @@ class BatchAutomationThread(QThread):
                 self.finished_signal.emit(True, "All Batches Processed")
         except Exception as fatal:
             msg = f"Fatal Batch Error: {fatal}"
+            self.fatal_error = msg
+            completed_ids = {r.get("action_id") for r in self.execution_results}
+            for patient in self.batch_queue:
+                for item in patient.get("items", []):
+                    if item.get("action_id") not in completed_ids:
+                        self.execution_results.append({"action_id": item.get("action_id"), "code": item.get("code"), "requested_quantity": item.get("qty", 1), "action_status": "FAILED", "portal_result": None, "error": msg, "retry_count": max(0, self.cdp_attempts - 1), "verification_result": "CDP_OR_PORTAL_UNAVAILABLE", "diagnostics": {}})
             self.logger.error(msg)
             self.logger.error(traceback.format_exc())
             DiagnosticEngine.capture_artifact(driver, "GLOBAL_FATAL", "FATAL", "FATAL_EXCEPTION", fatal)

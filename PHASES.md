@@ -6,7 +6,7 @@
 | 1 | Folder structure, Electron shell, external Storage, config, logs, state, tests, build foundation | Complete |
 | 2 | Bill ingestion, parser, normalized bill model | Complete; real-bill fixtures still unavailable |
 | 3 | CGHS rate-source layer and deterministic rule engine | Implemented; awaiting review, official rate source, and real-bill fixtures |
-| 4 | Portal enhancement automation | Not started |
+| 4 | Portal enhancement automation | Complete; deterministic mocks passed, live validation requires authenticated portal |
 | 5 | Enhancement verification workflow/UI | Not started |
 | 6 | Final bill extraction and composition | Not started |
 | 7 | Storage, recovery, logs, auditability hardening | Not started |

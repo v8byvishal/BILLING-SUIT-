@@ -9,5 +9,7 @@ contextBridge.exposeInMainWorld('vnext', Object.freeze({
   getStorageInfo: () => invoke('storage:get-info'),
   getConfig: () => invoke('config:get-public'),
   selectAndParseBill: () => invoke('bill:select-and-parse'),
+  previewPortalActions: () => invoke('portal:preview'),
+  executePortalActions: () => invoke('portal:execute'),
   reportRendererReady: () => invoke('app:renderer-ready')
 }));

@@ -1,5 +1,7 @@
 'use strict';
 
+let portalPreview = null;
+
 function text(id, value) { document.getElementById(id).textContent = value; }
 
 function displayNumber(value) { return value == null ? '—' : String(value); }
@@ -28,6 +30,7 @@ function renderPlan(plan) {
   text('rateSource', `${plan.rate_source.source_kind} · ${plan.rate_source.authority_status} · ${plan.rate_source.record_count} records`);
   text('planWarning', plan.warnings.length ? plan.warnings.join(', ') : 'Source verified');
   view.hidden = false;
+  document.getElementById('portalView').hidden = false;
 }
 
 async function selectAndParseBill() {
@@ -63,6 +66,32 @@ async function selectAndParseBill() {
   }
 }
 
+async function preparePortal() {
+  try {
+    portalPreview = await window.vnext.previewPortalActions();
+    document.getElementById('portalView').hidden = false;
+    text('portalStatus', 'READY FOR REVIEW');
+    text('portalSummary', `${portalPreview.actions.length} executable action(s); ${portalPreview.blocked.length} blocked/review action(s). Verify the authenticated portal session before execution.`);
+    document.getElementById('executePortal').disabled = portalPreview.actions.length === 0;
+  } catch (error) { text('portalStatus', 'ERROR'); text('portalSummary', error.message); }
+}
+
+async function executePortal() {
+  if (!portalPreview || !window.confirm(`Execute ${portalPreview.actions.length} verified action(s) in the live portal?`)) return;
+  const button = document.getElementById('executePortal');
+  button.disabled = true;
+  text('portalStatus', 'EXECUTING');
+  try {
+    const audit = await window.vnext.executePortalActions();
+    text('portalStatus', audit.status);
+    text('portalSummary', `Verified results: ${audit.counts.EXECUTED} executed, ${audit.counts.ALREADY_PRESENT} already present, ${audit.counts.FAILED} failed, ${audit.counts.UNKNOWN} unknown, ${audit.counts.BLOCKED} blocked.`);
+    const output = document.getElementById('portalAudit');
+    output.textContent = JSON.stringify(audit, null, 2);
+    output.hidden = false;
+  } catch (error) { text('portalStatus', 'FAILED'); text('portalSummary', error.message); }
+  finally { button.disabled = false; }
+}
+
 async function initialize() {
   try {
     const [status, storage, config] = await Promise.all([
@@ -78,6 +107,8 @@ async function initialize() {
     text('readyStatus', 'Application ready');
     document.querySelector('.dot').classList.add('ready');
     document.getElementById('selectBill').addEventListener('click', selectAndParseBill);
+    document.getElementById('preparePortal').addEventListener('click', preparePortal);
+    document.getElementById('executePortal').addEventListener('click', executePortal);
     await window.vnext.reportRendererReady();
   } catch (error) {
     text('readyStatus', 'Startup error');

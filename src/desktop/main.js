@@ -8,6 +8,9 @@ const { createAppState } = require('../core/app-state');
 const { ensureStorage, resolveStoragePath } = require('../core/storage');
 const { ingestBillPdf } = require('../services/bill-ingestion');
 const { createBundledRateRepository, evaluateBill } = require('../services/cghs');
+const { adaptEnhancementPlan } = require('../adapters/legacy-portal/plan-adapter');
+const { LegacyPythonRunner } = require('../adapters/legacy-portal/python-runner');
+const { executeEnhancementPlan } = require('../services/portal/portal-execution-service');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
@@ -15,6 +18,7 @@ let logger = null;
 let config = null;
 let storageInfo = null;
 let rateRepository = null;
+let currentEnhancementPlan = null;
 const state = createAppState();
 
 function publicConfig() {
@@ -42,6 +46,7 @@ function registerIpc() {
     try {
       const bill = await ingestBillPdf(selection.filePaths[0]);
       const enhancementPlan = evaluateBill(bill, rateRepository);
+      currentEnhancementPlan = enhancementPlan;
       state.set('BILL_LOADED');
       logger.info('Bill PDF parsed and deterministic plan prepared', {
         pages: bill.parsing_audit.pages_processed,
@@ -57,6 +62,17 @@ function registerIpc() {
       logger.error('Bill PDF parsing failed', error);
       throw new Error(`Bill could not be parsed: ${error.message}`);
     }
+  });
+  ipcMain.handle('portal:preview', () => {
+    if (!currentEnhancementPlan) throw new Error('Parse a bill before preparing portal actions');
+    return adaptEnhancementPlan(currentEnhancementPlan);
+  });
+  ipcMain.handle('portal:execute', async () => {
+    if (!currentEnhancementPlan) throw new Error('Parse a bill before portal execution');
+    logger.info('User requested legacy portal execution; authenticated Chrome CDP session is required');
+    const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner());
+    logger.info('Portal execution finished', { runId: audit.run_id, status: audit.status, counts: audit.counts });
+    return audit;
   });
   ipcMain.handle('app:renderer-ready', () => {
     logger.info('Renderer ready', { state: state.get() });

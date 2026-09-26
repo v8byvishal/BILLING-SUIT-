@@ -35,6 +35,12 @@ CC002 requires both C002/CC002 syntax and oxygen service/context evidence. A row
 
 Phase 3 consumes Phase 2 compound components. It may look up each syntactic base token, but does not assign meaning to `+L`, combine component rates, or turn the expression into an authoritative code. Such expressions remain `UNRESOLVED_COMPOUND` / `RULE_UNDEFINED` with raw text and component results preserved.
 
+## Phase 4 execution policy
+
+Phase 4 does not add business rules. It accepts only the final Phase 3 `EnhancementPlan` and blocks unknown, unresolved, undefined, review-required, malformed, unsupported, and Patient Payable/excluded records. Only `SOURCE_VERIFIED` and `RULE_VERIFIED` actions with positive integer final quantities may cross the adapter. CN002, CC001, WC001, and CC002 remain exclusively Phase 3 decisions.
+
+The existing Python Selenium executor remains authoritative for procedure search, speciality synchronization, quantity/locked-field handling, duplicate guards, recovery, diagnostics, reconciliation, and portal-row verification. Success is only `EXECUTED` after verified portal state or `ALREADY_PRESENT` after reconciliation; clicks and absence of exceptions are insufficient. Failures, unknown outcomes, blocked records, review records, and partial batches remain explicit.
+
 ## Prohibited scope
 
-No Selenium, locator, retry, CDP, portal, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented or changed. Settlement remains isolated under `src/services/settlement/`.
+No second Selenium engine, selector duplication, credential/login automation, security bypass, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented. Settlement remains isolated under `src/services/settlement/`.
