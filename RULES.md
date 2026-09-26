@@ -81,6 +81,16 @@ The existing Python Selenium executor remains authoritative for procedure search
 - Final sources attach only through Phase 7 deterministic matching; no “most recent case” fallback exists.
 - Original inbox files are copied into case archives and never automatically deleted.
 
+## Phase 9 validation policy
+
+- Expected versus actual comparison is review-only and cannot modify parser output, rules, plans, custom records, or portal actions.
+- `POSSIBLY_MISSING_CODE` requires concrete reviewed source/rule evidence. Without evidence, no code is named and the finding is `REVIEW_REQUIRED`.
+- Extra codes are exact section/logical-context candidates absent from the reviewed baseline; ordering and equivalent aggregation are not discrepancies.
+- Quantity, status, section, exclusion, compound, and derived-rule mismatches remain distinct.
+- Patient Payable leakage is always an `EXCLUSION_MISMATCH`.
+- Human classifications annotate findings only. Expected baselines change only through explicit file edits visible in version control.
+- No nearest-code, description similarity, numerical neighbor, fuzzy substitution, blacklist, or automatic correction is allowed.
+
 ## Prohibited scope
 
 No second Selenium engine, selector duplication, credential/login automation, security bypass, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented. Settlement remains isolated under `src/services/settlement/`.

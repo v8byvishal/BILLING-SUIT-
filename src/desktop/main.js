@@ -18,6 +18,8 @@ const { CaseStore } = require('../services/cases/case-store');
 const { ActiveCaseLock } = require('../services/cases/active-case-lock');
 const { InboxScanner } = require('../services/cases/inbox-scanner');
 const { CaseWorkflowService } = require('../services/cases/case-workflow-service');
+const { summarizeValidation, validateBill } = require('../services/validation/bill-validator');
+const { classifyDiscrepancy, saveValidation } = require('../services/validation/validation-store');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
@@ -36,6 +38,7 @@ let caseStore = null;
 let caseLock = null;
 let inboxScanner = null;
 let caseWorkflow = null;
+let currentValidationReport = null;
 const state = createAppState();
 
 function publicConfig() {
@@ -75,7 +78,9 @@ function registerIpc() {
   ipcMain.handle('storage:get-info', () => storageInfo);
   ipcMain.handle('config:get-public', () => publicConfig());
   ipcMain.handle('cases:list',()=>caseStore.list());
-  ipcMain.handle('cases:open',(_event,id)=>{const manifest=caseWorkflow.openCase(id);currentCaseId=id;const initialPath=path.join(caseStore.directory(id),'normalized','initial-bill.json');const planPath=path.join(caseStore.directory(id),'enhancement','plan.json');currentBill=fs.existsSync(initialPath)?JSON.parse(fs.readFileSync(initialPath)):null;currentEnhancementPlan=fs.existsSync(planPath)?JSON.parse(fs.readFileSync(planPath)):null;return{manifest,bill:currentBill,enhancementPlan:currentEnhancementPlan};});
+  ipcMain.handle('validation:select-and-run',async()=>{if(!currentBill||!currentEnhancementPlan||!currentCaseId)throw new Error('Open a parsed case before validation');const selection=await dialog.showOpenDialog(mainWindow,{title:'Select reviewed expected-results JSON',properties:['openFile'],filters:[{name:'Expected validation baseline',extensions:['json']}]});if(selection.canceled||!selection.filePaths[0])return{canceled:true};const fixture=JSON.parse(fs.readFileSync(selection.filePaths[0],'utf8'));currentValidationReport=validateBill({fixture,caseId:currentCaseId,runId:`validation-${crypto.randomUUID()}`,bill:currentBill,plan:currentEnhancementPlan});saveValidation(caseStore,currentCaseId,currentValidationReport);logger.info('Case validation completed',{caseId:currentCaseId,fixtureId:fixture.fixture_id,status:currentValidationReport.status,discrepancies:currentValidationReport.summary.discrepancies});return{canceled:false,report:currentValidationReport,summary:summarizeValidation(currentValidationReport)};});
+  ipcMain.handle('validation:classify',(_event,id,decision)=>{if(!currentValidationReport)throw new Error('No validation report is active');currentValidationReport=classifyDiscrepancy(currentValidationReport,id,decision);saveValidation(caseStore,currentCaseId,currentValidationReport);return currentValidationReport;});
+  ipcMain.handle('cases:open',(_event,id)=>{const manifest=caseWorkflow.openCase(id);currentCaseId=id;const initialPath=path.join(caseStore.directory(id),'normalized','initial-bill.json');const planPath=path.join(caseStore.directory(id),'enhancement','plan.json');currentBill=fs.existsSync(initialPath)?JSON.parse(fs.readFileSync(initialPath)):null;currentEnhancementPlan=fs.existsSync(planPath)?JSON.parse(fs.readFileSync(planPath)):null;currentValidationReport=null;return{manifest,bill:currentBill,enhancementPlan:currentEnhancementPlan};});
   ipcMain.handle('inbox:scan',async(_event,kind='initial')=>{const files=inboxScanner.scan(kind);const outcomes=[];for(const file of files.filter(x=>x.status==='STABLE')){if(kind==='initial')outcomes.push(await caseWorkflow.importInitial(file));else if(currentCaseId&&caseStore.load(currentCaseId).workflow_status==='FINAL_BILL_REQUIRED')outcomes.push(await caseWorkflow.attachFinal(currentCaseId,file,currentEnhancementPlan,currentExecutionAudit));}return{files,outcomes,cases:caseStore.list()};});
   ipcMain.handle('bill:select-and-parse', async () => {
     const selection = await dialog.showOpenDialog(mainWindow, {
@@ -92,7 +97,7 @@ function registerIpc() {
       if (result.outcome === 'EXACT_DUPLICATE') return { canceled: false, duplicate: true, case: result.case };
       if (!result.bill || !result.plan) throw new Error(result.reason || result.outcome);
       currentCaseId = result.case.case_id; currentBill = result.bill; currentEnhancementPlan = result.plan;
-      currentExecutionAudit = null; currentFinalBillPath = null; currentCompletedBill = null;
+      currentExecutionAudit = null; currentFinalBillPath = null; currentCompletedBill = null; currentValidationReport = null;
       customCodeRegistry.recordPlanUsage(result.plan); state.set('BILL_LOADED');
       logger.info('Case initial bill parsed and plan persisted', { caseId: currentCaseId, pages: result.bill.parsing_audit.pages_processed, planEntries: result.plan.entries.length, workflowStatus: result.case.workflow_status });
       return { canceled: false, case: result.case, bill: result.bill, enhancementPlan: result.plan };
@@ -102,7 +107,7 @@ function registerIpc() {
       throw new Error(`Bill could not be parsed: ${error.message}`);
     }
   });
-  ipcMain.handle('review:list', () => currentEnhancementPlan ? createReviewQueue(currentEnhancementPlan) : []);
+  ipcMain.handle('review:list', () => currentEnhancementPlan ? createReviewQueue(currentEnhancementPlan, currentValidationReport?.discrepancies || []) : []);
   ipcMain.handle('review:record', (_event, decision) => customCodeRegistry.recordReview(decision));
   ipcMain.handle('custom-codes:list', (_event, filters) => ({ records: customCodeRegistry.list(filters), registry: customCodeRegistry.snapshot() }));
   ipcMain.handle('custom-codes:create', (_event, input) => {

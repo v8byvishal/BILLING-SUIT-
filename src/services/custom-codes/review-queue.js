@@ -21,7 +21,7 @@ function evidence(record) {
   };
 }
 
-function createReviewQueue(plan) {
+function createReviewQueue(plan, discrepancies = []) {
   const records = [];
   for (const entry of plan.entries || []) {
     if (!REVIEW_STATUSES.has(entry.status) && entry.code_validation !== 'UNKNOWN' && entry.code_validation !== 'UNRESOLVED_COMPOUND') continue;
@@ -32,6 +32,14 @@ function createReviewQueue(plan) {
     if (candidate.status === 'EXCLUDED_BY_SECTION') continue;
     const item = { code: candidate.code || null, status: candidate.status, reason: candidate.reason || candidate.status, ...evidence(candidate) };
     records.push({ review_id: idFor(item), scope: 'BILL_SPECIFIC', current_status: 'OPEN', available_actions: ['REVIEW', ...(candidate.code && /^[A-Z]{1,5}\d{2,6}$/.test(candidate.code) ? ['ADD_CUSTOM_CODE'] : []), 'DISMISS'], ...item });
+  }
+  for (const finding of discrepancies) {
+    const item = { code: finding.code || null, status: finding.type, reason: finding.reason, raw_text: finding.evidence?.raw_text || null,
+      normalized_text: finding.evidence?.normalized_value || finding.code || null, source_page: finding.evidence?.page || null,
+      section: finding.evidence?.section || finding.section || null, quantity: finding.actual_quantity ?? null,
+      parser_decision: finding.actual_status || null, rule_decision: finding.layer || null };
+    records.push({ review_id: finding.discrepancy_id || idFor(item), scope: 'VALIDATION', current_status: finding.review_status || 'NEEDS_REVIEW',
+      available_actions: ['REVIEW', 'DISMISS'], validation_discrepancy: true, ...item });
   }
   return records;
 }

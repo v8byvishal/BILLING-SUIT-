@@ -1,0 +1,22 @@
+{
+  "fixture_id": "replace-with-non-patient-fixture-id",
+  "source_filename": "local-file.pdf",
+  "source_sha256": "replace-with-exact-sha256",
+  "page_count": 0,
+  "metadata": {
+    "date_added": "YYYY-MM-DD",
+    "fixture_status": "DRAFT",
+    "privacy_approval_status": "NOT_APPROVED"
+  },
+  "expected": {
+    "sections": [
+      { "section": "INVESTIGATIONS", "context": "PRIMARY_BILL", "evidence": { "page": 1, "raw_text": "reviewed heading excerpt" } }
+    ],
+    "codes": [
+      { "code": "B126", "section": "INVESTIGATIONS", "kind": "DIRECT", "quantity": 1, "status": "REVIEW_REQUIRED", "evidence": { "page": 1, "raw_text": "reviewed row excerpt" } }
+    ],
+    "excluded": [],
+    "format_variations": [],
+    "final_records": []
+  }
+}

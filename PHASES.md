@@ -11,7 +11,7 @@
 | 6 | Review queue, custom/unslotted code registry, and controlled overrides | Complete; deterministic persistence/staleness tests passed |
 | 7 | Post-discharge final bill ingestion, enrichment, and completed package storage | Complete with synthetic fixtures; real PDF regression unavailable |
 | 8 | Folder intake, one-case workflow state machine, locking, and recovery | Complete; deterministic operational tests passed |
-| 9 | EXE packaging/deployment hardening | Not started |
+| 9 | Production validation, discrepancy detection, and real-PDF harness | Complete with synthetic coverage; source production PDFs unavailable |
 | 10 | Full regression and release validation | Not started |
 
 No phase begins automatically. Phase 1 does not include any Phase 2–10 business capability.

@@ -18,4 +18,6 @@ Phase 5 parser hardening appears through the existing plan/audit contract: execu
 
 Phase 6 adds two compact work areas: an Enhancement Review evidence table with Review/Add Custom/Dismiss actions, and a Custom Code Registry with exact-text search, edit, deactivate/reactivate, and audit controls. Custom overrides are visibly labeled and there is no bulk/automatic approval. Phase 7 adds one compact Final Bill area: manual-discharge confirmation, local PDF selection, exact match status, section/item evidence, explicit match resolution, and completed-package save.
 
-Phase 8 adds a compact Operational Cases table, manual Initial/Final inbox scans, active-case status, and state-gated verification/discharge acknowledgement buttons. Invalid actions stay hidden or disabled. This is not a dashboard and does not introduce background polling. It does not control discharge, upload/download portal bills, run OCR, or perform settlement.
+Phase 8 adds a compact Operational Cases table, manual Initial/Final inbox scans, active-case status, and state-gated verification/discharge acknowledgement buttons. Invalid actions stay hidden or disabled.
+
+Phase 9 adds one Bill Validation panel for selecting a reviewed expected JSON, concise counts, discrepancy rows, evidence inspection, and explicit human classification. It is not a dashboard, does not auto-update baselines, and offers no auto-fix. The shell still does not control discharge, upload/download portal bills, run OCR, or perform settlement.

@@ -2,68 +2,77 @@
 
 ## Current phase
 
-**Phase 8 — Folder-Based Bill Intake, One-Bill Workflow State Machine & Operational Case Management: complete for review.**
+**Phase 9 — Production Bill Validation, Discrepancy Detection & Real-PDF Regression Harness: complete for review.**
 
-Phase 8 wraps the existing parser, planner, custom registry, Phase 4 executor boundary, and Phase 7 final-bill service in persistent case orchestration. It adds no parser, Selenium engine, OCR, portal discharge/upload/download, settlement, AI review, or background autonomous service.
+Phase 9 adds an evidence-first validation layer around existing normalized bill, EnhancementPlan, custom registry, final extraction, and persistent case artifacts. It does not change parsing/rules, produce actions, guess codes, update baselines, or add OCR/portal/discharge/settlement behavior.
 
-## External intake and cases
+## Validation engine
 
-The existing configurable external Storage root now creates:
+`src/services/validation/bill-validator.js` consumes exactly one existing BillDocument and EnhancementPlan plus a reviewed expected JSON. Machine-readable reports include fixture/case/run/source identity, parser/plan versions, custom registry context, matches, blocked records, discrepancies, open review records, counts, and concise source evidence.
 
-- `Storage/Inbox/Initial/`
-- `Storage/Inbox/Final/`
-- `Storage/Cases/<case-id>/{initial,enhancement,final,normalized,audit}/`
+Implemented findings:
 
-Manual scans are sorted and metadata-first. Hidden, temporary (`.tmp`, `.part`, `.crdownload`), and non-PDF files are ignored. A candidate must have unchanged size/mtime over two observations and satisfy minimum age before SHA-256 calculation and registration. Inbox sources are copied into case storage and never automatically deleted. Archive failures are explicit.
+- `EXTRA_CODE`
+- `POSSIBLY_MISSING_CODE`
+- `QUANTITY_MISMATCH`
+- `STATUS_MISMATCH`
+- `SECTION_MISMATCH`
+- `EXCLUSION_MISMATCH`
+- `DERIVED_QUANTITY_MISMATCH`
+- `COMPOUND_STATUS_MISMATCH`
+- `UNKNOWN_CODE`
+- `UNRESOLVED_COMPOUND`
+- `RULE_UNDEFINED`
+- `REVIEW_REQUIRED`
 
-## Persistent case model
+A missing code is named only when the reviewed expected entry includes concrete row/page/rule evidence. Otherwise a code-free review finding is emitted. Derived CN002/CC001/WC001/CC002 checks retain rule-vs-plan layer evidence. Patient Payable leakage is high-visibility exclusion mismatch. Pharmacy/consumable validation remains enrichment-only.
 
-Atomic case manifests retain case/version/parent identity, initial/final source references and hashes, bill number/UHID/IP number, state/stage, timestamps, EnhancementPlan and registry revision/hash references, execution/final/completed references, review flags, and errors. A SHA-256 index returns `EXACT_DUPLICATE`/`KNOWN_SOURCE`; explicit reprocessing creates a linked version rather than overwriting history. COMPLETED manifests are immutable.
+## Human review and persistence
 
-The allowlisted state machine includes NEW, INGESTING, READY_FOR_PLAN, PLAN_READY, REVIEW_REQUIRED, READY_FOR_PORTAL, PORTAL_EXECUTING, PORTAL_EXECUTED, VERIFICATION_REQUIRED, DISCHARGE_REQUIRED, FINAL_BILL_REQUIRED, FINAL_BILL_LOADED, FINAL_BILL_REVIEW_REQUIRED, MATCH_REQUIRED, READY_TO_SAVE, COMPLETED, FAILED, BLOCKED, and RECOVERY_REQUIRED. Every transition is audited with event ID, case ID, timestamp, previous/new state, reason, and limited source reference.
+`validation-store.js` persists reports beneath `Storage/Cases/<case-id>/validation/` and records case audit. Human decisions are limited to `CONFIRMED`, `FALSE_POSITIVE`, `EXPECTED_VARIATION`, and `NEEDS_REVIEW`; they annotate findings and never auto-fix. Validation discrepancies extend the existing Phase 6 review queue.
 
-## Lock and recovery
+The minimal UI selects an expected JSON for the active case, shows summary/discrepancy evidence, and records classifications. Expected files are never written by runtime validation.
 
-`Storage/Cases/active-case-lock.json` records case ID, random ownership token, PID, acquisition, and heartbeat. A live lock prevents another case from replacing the browser context or executing simultaneously. Only the owner releases it. Dead/expired locks are recoverable. On restart, any `PORTAL_EXECUTING` case becomes `RECOVERY_REQUIRED`; portal automation never auto-resumes.
+## Real-PDF harness
 
-Existing relevant-record `PLAN_STALE` checks remain enforced before the lock/executor boundary. The exact persisted plan and custom registry revision/hash are retained in each case.
+- Command: `npm run test:real-bills`
+- Discovery: `tests/fixtures/bills/real/<fixture-id>/`
+- Required local files: one PDF plus `expected.json`
+- Privacy gate: `metadata.privacy_approval_status` must equal `APPROVED`
+- Documentation/template: `tests/fixtures/bills/real/README.md` and `expected.template.json`
+- Optional external fixture root: `VNEXT_REAL_FIXTURES`
 
-## Manual checkpoints and final continuation
+The harness performs one PDF parse, one plan evaluation, and one validation pass. It writes `actual-report.json`; it never creates or updates expected baselines.
 
-Portal result verification and manual discharge are separate explicit operator acknowledgements. Discharge confirmation only writes audit/state and performs no portal action. Final PDFs attach to the active FINAL_BILL_REQUIRED case through Phase 7 exact identifier reconciliation; no recent-case fallback exists. Final extraction/storage advances the same case to READY_TO_SAVE/COMPLETED.
+Actual result in this workspace:
 
-## Minimal UI
+**REAL PDF REGRESSION = NOT RUN — SOURCE PDFs NOT AVAILABLE**
 
-The shell adds an Operational Cases queue with case ID, bill number, status, update time, review flags, Open, manual Initial/Final inbox scans, and state-gated verification/discharge acknowledgement. It does not auto-switch a locked case and has no background polling dashboard.
+The named 40332/40343/39951/38222 PDFs were not accessible. Synthetic tests are not represented as production validation.
 
-## Validation
+## Validation results
 
-- Before Phase 8: **105 tests**.
-- Phase 8 adds **24 deterministic tests** for source deduplication, file stability/partial/temp handling, restart persistence, active lock/stale recovery, plan registry identity/staleness, final association, completed immutability/reprocessing, interrupted execution recovery, manual discharge boundary, transition/audit rules, archive failure, queued isolation, and a 200-PDF inbox.
-- After Phase 8: `npm test` — **129 passed, 0 failed, 0 skipped**.
+- Before Phase 9: **129 tests**.
+- Phase 9 adds **26 deterministic tests**.
+- After Phase 9: `npm test` — **155 passed, 0 failed, 0 skipped**.
 - JavaScript syntax checks over every `src/**/*.js`: passed.
-- Python syntax checks for `app (1).py` and `portal_bridge.py`: passed; Phase 8 changed no Python.
+- Python syntax checks for `app (1).py` and `portal_bridge.py`: passed; Phase 9 changed no Python.
 - `git diff --check`: passed.
 - `npm audit --omit=dev`: **0 vulnerabilities**.
 - Reference snapshot SHA-256 remains `b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba`.
-- Real PDF regression: **NOT RUN**; privacy-approved production PDFs remain unavailable.
 - Live portal testing: **NOT RUN — LIVE PORTAL REQUIRED**.
 
 ## Preserved boundaries
 
-- Phase 4 Selenium/CDP remains the only browser executor.
-- Phase 6 custom registry/review and PLAN_STALE remain intact.
-- Phase 7 CompletedBill packages remain under `Storage/Bills/` and readable.
-- The reference snapshot remains `RATE_SOURCE_UNDEFINED`.
-- `src/services/settlement/` remains isolated and untouched.
+No fuzzy matching, valid-code blacklist, AI guessing, OCR, automated discharge, portal final-bill download/upload, or Settlement/Reconciliation was added. Phase 4 browser execution, Phase 6 custom registry/PLAN_STALE, Phase 7 completed storage, and Phase 8 case locking/recovery remain intact.
 
 ## Git
 
 - Branch: `arena/01a0de46-billing-suit`
-- Phase 7 commit: `4cf408d`
+- Phase 8 commit: `91e0cef`
 - PR #1 remains open and must not be merged automatically.
-- Phase 8 commit is pending at the time of this entry.
+- Phase 9 commit is pending at the time of this entry.
 
 ## Stop point
 
-Stop after Phase 8. Do not begin automated portal upload/download/discharge, OCR, advanced AI review, or Settlement/Reconciliation.
+Stop after Phase 9. Do not begin OCR, automated discharge/download, broader portal control, Settlement/Reconciliation, or autonomous code generation.

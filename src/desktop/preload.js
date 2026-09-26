@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('vnext', Object.freeze({
   scanInbox: (kind) => invoke('inbox:scan', kind),
   confirmVerification: (operator) => invoke('case:confirm-verification', operator),
   confirmDischarge: (operator) => invoke('case:confirm-discharge', operator),
+  runBillValidation: () => invoke('validation:select-and-run'),
+  classifyValidationFinding: (id, decision) => invoke('validation:classify', id, decision),
   listReviewQueue: () => invoke('review:list'),
   recordReviewDecision: (decision) => invoke('review:record', decision),
   listCustomCodes: (filters) => invoke('custom-codes:list', filters),

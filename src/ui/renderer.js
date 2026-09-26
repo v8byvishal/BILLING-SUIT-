@@ -39,6 +39,7 @@ function renderPlan(plan) {
   text('planWarning', plan.warnings.length ? plan.warnings.join(', ') : 'Source verified');
   view.hidden = false;
   document.getElementById('portalView').hidden = false;
+  document.getElementById('validationView').hidden = false;
 }
 
 function updateCaseActions(manifest) {
@@ -87,6 +88,13 @@ async function selectAndParseBill() {
     button.disabled = false;
   }
 }
+
+function renderValidation(report, summary) {
+  text('validationStatus',report.status);text('validationSummary',summary||`${report.summary.matches} matches · ${report.summary.discrepancies} discrepancies`);
+  const body=document.getElementById('validationRows');body.replaceChildren();
+  for(const finding of report.discrepancies){const row=document.createElement('tr');for(const value of [finding.type,finding.code,displayNumber(finding.expected_quantity),displayNumber(finding.actual_quantity),`${finding.evidence?.section||finding.section||'—'} / ${finding.evidence?.page||'—'}`,finding.reason]){const cell=document.createElement('td');cell.textContent=value||'—';row.appendChild(cell);}const action=document.createElement('td');action.append(button('Evidence',()=>{const out=document.getElementById('validationEvidence');out.textContent=JSON.stringify(finding,null,2);out.hidden=false;}));action.append(button('Classify',async()=>{const classification=window.prompt('Classification: CONFIRMED, FALSE_POSITIVE, EXPECTED_VARIATION, or NEEDS_REVIEW','NEEDS_REVIEW');if(!['CONFIRMED','FALSE_POSITIVE','EXPECTED_VARIATION','NEEDS_REVIEW'].includes(classification))return;const operator=window.prompt('Operator identifier'),reason=window.prompt('Reason');if(!operator||!reason)return;const updated=await window.vnext.classifyValidationFinding(finding.discrepancy_id,{classification,operator,reason});renderValidation(updated);await loadReviewQueue();}));row.appendChild(action);body.appendChild(row);}
+}
+async function runValidation(){try{const result=await window.vnext.runBillValidation();if(!result.canceled){renderValidation(result.report,result.summary);await loadReviewQueue();}}catch(error){text('validationStatus','FAILED');text('validationSummary',error.message);}}
 
 async function loadReviewQueue() {
   currentReviewQueue = await window.vnext.listReviewQueue();
@@ -248,6 +256,7 @@ async function initialize() {
     document.getElementById('scanFinalInbox').addEventListener('click',()=>scanInbox('final'));
     document.getElementById('confirmVerification').addEventListener('click',()=>confirmCaseStep('verification'));
     document.getElementById('confirmDischarge').addEventListener('click',()=>confirmCaseStep('discharge'));
+    document.getElementById('runValidation').addEventListener('click',runValidation);
     await loadRegistry();
     await loadCases();
     await window.vnext.reportRendererReady();
