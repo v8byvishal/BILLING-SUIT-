@@ -2075,12 +2075,16 @@ class BatchAutomationThread(QThread):
         self.logger = EnterpriseLogger(self.log_signal)
         self._is_cancelled = False
         self.execution_results = []  # structured Phase 4 audit, additive to existing logs/signals
+        self.execution_checkpoints = []
+        self.batch_metrics = {}
         self.fatal_error = None
         self.cdp_attempts = 0
     def stop(self):
         self._is_cancelled = True
         self.logger.warn("BatchThread: Cancellation")
     def run(self):
+        batch_started = time.time()
+        self.execution_checkpoints.append({"event": "RUN_STARTED", "timestamp": datetime.utcnow().isoformat() + "Z"})
         self.logger.info(f"BatchThread: Starting [{self.delay_mode}]...")
         self.logger.info("BatchThread: Connecting Chrome Debug 127.0.0.1:9222...")
         driver = None
@@ -2185,6 +2189,19 @@ class BatchAutomationThread(QThread):
                     self.patient_status_signal.emit(p_idx, "COMPLETED" if not failed_items else "PARTIAL")
                     self.logger.info(f"Patient done: {p_name} ({success_count})")
             if not self._is_cancelled:
+                duration_ms = int((time.time() - batch_started) * 1000)
+                executable = [r for r in self.execution_results if r.get("action_status") not in ("BLOCKED", "REVIEW_REQUIRED")]
+                self.batch_metrics = {
+                    "action_count": len(self.execution_results),
+                    "successful_count": sum(r.get("action_status") == "EXECUTED" for r in self.execution_results),
+                    "already_present_count": sum(r.get("action_status") == "ALREADY_PRESENT" for r in self.execution_results),
+                    "failed_count": sum(r.get("action_status") not in ("EXECUTED", "ALREADY_PRESENT") for r in self.execution_results),
+                    "blocked_count": sum(r.get("action_status") == "BLOCKED" for r in self.execution_results),
+                    "review_required_count": sum(r.get("action_status") == "REVIEW_REQUIRED" for r in self.execution_results),
+                    "total_duration_ms": duration_ms,
+                    "average_executable_duration_ms": round(sum(r.get("metrics", {}).get("total_ms", 0) for r in executable) / len(executable), 2) if executable else 0,
+                }
+                self.execution_checkpoints.append({"event": "BATCH_COMPLETED", "timestamp": datetime.utcnow().isoformat() + "Z", "metrics": self.batch_metrics})
                 self.finished_signal.emit(True, "All Batches Processed")
         except Exception as fatal:
             msg = f"Fatal Batch Error: {fatal}"

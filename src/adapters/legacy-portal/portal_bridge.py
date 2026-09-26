@@ -77,6 +77,8 @@ def main():
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "legacy_finished_signal": completed,
             "results": executor.execution_results,
+            "checkpoints": executor.execution_checkpoints,
+            "metrics": executor.batch_metrics,
             "fatal_error": executor.fatal_error,
         })
         return 0 if not executor.fatal_error else 1
