@@ -2,97 +2,146 @@
 
 ## Current phase
 
-**Phase 1 — Project Foundation + EXE Shell + External Storage**
-Implementation complete; awaiting human review. The Electron launch smoke test is implemented but could not execute in the Arena Linux environment because the Electron runtime binary download failed at TLS/network transport. This is an explicit validation blocker, not a product success claim.
+**Phase 2 — Bill Ingestion + PDF Parser + Normalized Bill Model**
+
+Implementation is complete for review. No real hospital bill PDFs were available in the repository/session, so real-layout accuracy remains unvalidated. The parser is not production-ready and does not claim 100% accuracy.
 
 ## Completed work
 
-- Added a folder-based Electron foundation under `src/` without moving legacy files.
-- Added a minimal professional readiness renderer; no business workflow is represented as implemented.
-- Added a sandboxed preload with four explicit, read-only IPC operations.
-- Added configuration loading and validation.
-- Added runtime-resolved external Storage creation and write verification.
-- Added structured JSON-lines logging under external `Storage/Logs`.
-- Added startup/fatal error handling and controlled shutdown logging.
-- Added the future workflow state vocabulary, initialized only to `IDLE`.
-- Added pinned Electron/Electron Builder configuration and Windows portable build direction.
-- Added unit tests and an Electron startup/renderer IPC/shutdown smoke-test harness.
-- Added architecture, design, phase, and rule-preservation documentation.
+- Added local PDF path/readability/signature/size validation and page-aware text extraction with `pdfjs-dist`.
+- Preserved source file identity, SHA-256, raw page text, line content, and one-based page numbers.
+- Added semantic section segmentation with explicit start/end/content and cross-page state.
+- Added source metadata, patient/admission/billing field extraction without fabricated defaults.
+- Added service item extraction with source section/page/line/raw context.
+- Added purely syntactic single/compound code normalization.
+- Added exact-expression, same-section primary aggregation with occurrence references.
+- Added structural Bed Details extraction only; no ward/ICU calculations.
+- Added semantic Patient Payable context and nested-section exclusion.
+- Added practical parsing audit data and rejected-token reasons.
+- Added minimal Select PDF → Parsing → Result/status UI and controlled preload IPC.
+- Added a documentation-only future Settlement/Reconciliation boundary.
 
-## Files created
+## Parser modules created
 
-- `.gitignore`
-- `ARCHITECTURE.md`
-- `DESIGN.md`
-- `RULES.md`
-- `PHASES.md`
-- `MEMORY.md`
-- `config/default.json`
-- `scripts/smoke-test.js`
-- `src/core/app-state.js`
-- `src/core/config.js`
-- `src/core/logger.js`
-- `src/core/storage.js`
-- `src/desktop/main.js`
-- `src/desktop/preload.js`
-- `src/ui/index.html`
-- `src/ui/renderer.js`
-- `src/ui/styles.css`
-- Structural `.gitkeep` files under `src/adapters`, `src/services`, `src/shared`, all six `storage/` categories, `tests/integration`, and `tests/fixtures`
-- Unit tests under `tests/unit/`
+`src/services/bill-ingestion/`:
+
+- `pdf-loader.js`
+- `page-parser.js`
+- `section-detector.js`
+- `field-parser.js`
+- `code-normalizer.js`
+- `compound-code-parser.js`
+- `bed-details-parser.js`
+- `aggregator.js`
+- `normalized-model.js`
+- `bill-parser.js`
+- `index.js`
+
+## Normalized Bill Model
+
+```text
+BillDocument
+├── model_version
+├── source { file_path, file_name, byte_size, sha256 }
+├── metadata
+├── patient
+├── admission
+├── billing
+├── pages[] { page_number, raw_text, lines[] }
+├── sections[]                 # primary only
+│   └── items[]
+├── items[]                    # primary flattened items only
+├── aggregates[]               # primary exact-expression aggregation only
+├── bed_details[]
+├── excluded_sections[]        # Patient Payable hierarchy + excluded items
+└── parsing_audit
+```
+
+Unavailable fields remain `null`. Excluded Patient Payable items never enter primary `items` or `aggregates`, but remain traceable under `excluded_sections` and audit records.
+
+## Compound-code behavior
+
+- Preserves `raw_code_expression`.
+- Produces a whitespace-normalized expression and slash-separated syntactic components.
+- Preserves base token and `+` qualifier tokens separately.
+- Labels qualifier semantics such as `+L` as `RULE_UNDEFINED` and interpretation as `NOT_INFERRED`.
+- Does not perform CGHS rate-list validation or map `B068+L` to an invented authoritative code.
+
+## Patient Payable behavior
+
+- Detects a `Patient Payable` semantic parent marker and closes it at `Patient Payable Total`.
+- Carries `PATIENT_PAYABLE` context across nested headings/pages rather than excluding a page number.
+- Keeps primary `IP_PHARMACY` and Patient Payable `IP_PHARMACY` as distinct section objects.
+- Excludes Patient Payable items from the flattened primary dataset and aggregation.
 
 ## Files modified
 
-- `package.json` — VNEXT entry point, scripts, pinned desktop tooling, packaging configuration
-- `package-lock.json` — reproducible dependency lock
+- `ARCHITECTURE.md`, `RULES.md`, `PHASES.md`, `MEMORY.md`
+- `package.json`, `package-lock.json`
+- `src/desktop/main.js`, `src/desktop/preload.js`
+- `src/ui/index.html`, `src/ui/renderer.js`, `src/ui/styles.css`
 
 ## Legacy files intentionally untouched
 
-- `app (1).py` — legacy Python parser/enhancement/Selenium baseline
-- `CGHS_Billing_Suite_Pro.html` — HFOS/Billing Suite baseline
-- root `main.js` and root `preload.js` — v5 Electron/database reference implementation
-- All CGHS rates, calculations, locators, retries, CDP behavior, and historical reports
+- `app (1).py`
+- `CGHS_Billing_Suite_Pro.html`
+- root `main.js` and root `preload.js`
+- all CGHS rates, formulas, parser calculations, Selenium/CDP behavior, locators, retries, and historical reports
 - `PRD.md`
 
-No exact root `app.py` exists; the filename conflict remains as documented in `PRD.md`.
+No CN002, WC001, ICU, ward, oxygen, rate, enhancement, portal, pharmacy attachment, consumable attachment, final composition, missing-code, or settlement calculation was implemented.
+
+## Settlement/Reconciliation evidence and boundary
+
+Inspected the repository settlement implementation/reference in `CGHS_Billing_Suite_Pro.html` plus `SETTLEMENT_MODULE_REPORT.md`, `MATCHING_ENGINE_REPORT.md`, `ROBUST_SETTLEMENT_REPORT.md`, `ADVANCED_SETTLEMENT_REPORT.md`, `CASE_GROUP_ENGINE_REPORT.md`, `VALIDATION_REPORT.md`, and related analysis reports. No separately named new Claims Reconciliation/Bill-UHID Mapping document file was present in the checkout; the Phase 2 instruction itself supplied Registration-ID, IP-first/OP-fallback, multiple-value/status, traceability, count, audit, and validation requirements.
+
+`src/services/settlement/README.md` preserves a future service boundary. The bill parser does not normalize Registration IDs, query IP/OP data, match claims, enrich Bill No/UHID, set `MULTIPLE`/`UNMATCHED`, or invoke/duplicate the HFOS settlement engine.
 
 ## Tests actually run
 
-1. `npm test` — **PASS: 6 tests, 0 failed**
-   - application state initialization/validation
-   - default configuration load
-   - unsafe relative Storage path rejection
-   - structured logger initialization/write
-   - external Storage resolution and six-directory creation
-   - application-package Storage rejection
-2. `npm audit --omit=dev` — **PASS: 0 production dependency vulnerabilities**
-3. `npm run test:desktop` — **NOT PASSED / ENVIRONMENT BLOCKED**
-   - Electron npm package metadata installed, but its runtime binary could not be downloaded.
-   - Standard install failed certificate verification; mirror/retry also failed before TLS connection.
-   - The harness therefore did not launch Electron in this environment.
-4. `git diff --check` — **PASS** before the foundation commit.
+Command: `npm test`
 
-No parser, CGHS rule, Selenium, CDP, production portal, bill-processing, or final-PDF tests were run.
+**Result: 15 passed, 0 failed.** Coverage includes:
 
-## Storage strategy
+- synthetic two-page local PDF creation, extraction, page preservation, parser handoff, and source-page checks;
+- normalized model metadata, sections, items, traceability, and Bed Details;
+- primary IP Pharmacy included versus Patient Payable IP Pharmacy excluded;
+- excluded quantity not merged into primary aggregation;
+- exact-expression duplicate occurrence retention and numeric quantity aggregation;
+- `B068+L / B075+L / B126` preservation/components/audit with no invented semantics;
+- plus-sign expression accepted syntactically rather than rejected solely for `+`;
+- PDF line reconstruction and clear missing/non-PDF failures;
+- Phase 1 configuration, state, logger, and external Storage regressions.
 
-Default: `<OS Documents>/CGHS Billing Suite VNEXT/Storage`. An absolute path override is accepted through `VNEXT_STORAGE_PATH`. Relative paths and paths inside the application package are rejected. Startup creates `Source_Bills`, `Final_Bills`, `Supporting_Sections`, `Logs`, `Failed`, and `Reports`, then verifies writability. Repository `storage/` folders are empty templates only and ignore runtime contents.
+Additional commands:
 
-## Unresolved issues
+- JavaScript syntax checks over all `src/**/*.js`: passed.
+- `npm audit --omit=dev`: 0 production dependency vulnerabilities.
+- `git diff --check`: passed before implementation commit.
 
-- Execute `npm install` and `npm run test:desktop` in an environment that can download the pinned Electron 31.7.7 runtime; confirm launch, renderer, IPC, and shutdown.
-- Run `npm run build:win` and validate the portable EXE on Windows 10/11. No Windows artifact was produced in Phase 1.
-- Development dependencies report npm audit findings transitively; production dependency audit reports zero. Review tooling versions before release hardening.
-- Code signing, icons, installer UX, supported architecture policy, Storage encryption/retention, and final packaging policy remain later-phase work.
-- Existing encrypted v5 sql.js storage is preserved in legacy root `main.js`; migration/continued role remains undecided.
+## Real bills tested
+
+**None.** There are no PDF files in the repository/session. `tests/integration/pdf-ingestion.test.js` creates a deterministic synthetic PDF and is explicitly not represented as a real-bill regression. `tests/fixtures/bill-text/semantic-bill.json` is synthetic structured text used for deterministic semantic regressions.
+
+## Known limitations
+
+- Actual hospital PDF layouts, text ordering, wrapped/tabular rows, fonts, scanned PDFs/OCR, and all real section variants remain unvalidated.
+- Text extraction does not perform OCR.
+- Section and field recognition is conservative and marker/regex based; unfamiliar headings remain undetected.
+- Item column extraction cannot reliably reconstruct every visually tabular PDF without real fixtures.
+- Compound parsing is syntactic only; `+L` remains undefined.
+- Aggregation is intentionally narrow: exact normalized expression + same section + numeric quantities only.
+- Date values are preserved as source strings; no date/business-duration calculations occur.
+- The Phase 1 Electron runtime smoke-test environment blocker remains unresolved.
 
 ## Git state
 
-- Branch: `arena/01a0de46-billing-suit` (Arena session-fixed branch)
-- Phase 1 foundation implementation commit: `a5915fd`
-- Phase 0 commit: `ffb485b`
-- Pull request: existing repository PR is updated from this same branch; see final Phase 1 report for URL/status.
+- Branch: `arena/01a0de46-billing-suit`
+- Phase 2 implementation commit: `dc9af61`
+- Phase 1 foundation commit: `a5915fd`
+- Phase 0 PRD commit: `ffb485b`
+- Pull request remains open and must not be merged automatically.
 
 ## Next phase
 
-**Phase 2 — Bill ingestion + parser + normalized bill model**, only after human review and separate instructions. Do not begin automatically. Legacy parsing/business behavior must remain unchanged until regression fixtures and explicit Phase 2 scope are approved.
+**Phase 3 — authoritative CGHS rate list + deterministic rule engine**, only after human review and separate instructions. Phase 3 has not started. Real sanitized bill PDFs should be supplied before treating Phase 2 parsing behavior as a validated baseline.
