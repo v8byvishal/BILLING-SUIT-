@@ -34,6 +34,7 @@
     <section class="plan-view" id="caseView" aria-labelledby="caseTitle">
       <div class="plan-head"><div><h3 id="caseTitle">Operational cases</h3><p>One persistent case controls the current bill and browser context.</p></div><span id="currentCaseStatus">NO ACTIVE CASE</span></div>
       <div class="final-actions"><button id="scanInitialInbox" type="button">Scan Initial inbox</button><button id="scanFinalInbox" type="button">Scan Final inbox</button><button id="confirmVerification" type="button" hidden>Confirm verification</button><button id="confirmDischarge" type="button" hidden>Confirm manual discharge</button></div>
+      <div class="final-actions" aria-label="Automatic inbox intake"><strong>Automatic inbox intake: <span id="watcherStatus">STOPPED</span></strong><button id="watcherStart" type="button">Start</button><button id="watcherPause" type="button">Pause</button><button id="watcherResume" type="button">Resume</button><button id="watcherStop" type="button">Stop</button><span id="watcherInfo">No scan yet</span></div>
       <div class="table-wrap"><table><thead><tr><th>Case ID</th><th>Bill No</th><th>Status</th><th>Updated</th><th>Review</th><th>Action</th></tr></thead><tbody id="caseRows"></tbody></table></div>
     </section>
 

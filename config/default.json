@@ -5,6 +5,14 @@
     "level": "INFO"
   },
   "networkProfile": "default",
+  "automaticInboxWatch": {
+    "enabled": false,
+    "pollingIntervalMs": 30000,
+    "stabilityWindowMs": 1000,
+    "minimumFileAgeMs": 1000,
+    "maximumQueueSize": 100,
+    "backgroundConcurrency": 1
+  },
   "features": {
     "billWorkflow": false,
     "enhancementWorkflow": false,

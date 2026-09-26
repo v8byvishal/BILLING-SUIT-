@@ -30,6 +30,14 @@ function loadConfig(options = {}) {
     logging: Object.freeze({ level: loggingLevel }),
     networkProfile: raw.networkProfile || 'default',
     features: Object.freeze({ ...(raw.features || {}) }),
+    automaticInboxWatch: Object.freeze({
+      enabled: raw.automaticInboxWatch?.enabled === true,
+      pollingIntervalMs: Math.max(5000, Number(raw.automaticInboxWatch?.pollingIntervalMs) || 30000),
+      stabilityWindowMs: Math.max(0, Number(raw.automaticInboxWatch?.stabilityWindowMs) || 1000),
+      minimumFileAgeMs: Math.max(0, Number(raw.automaticInboxWatch?.minimumFileAgeMs) || 1000),
+      maximumQueueSize: Math.max(1, Number(raw.automaticInboxWatch?.maximumQueueSize) || 100),
+      backgroundConcurrency: Math.max(1, Math.min(4, Number(raw.automaticInboxWatch?.backgroundConcurrency) || 1))
+    }),
     configFile
   });
 }

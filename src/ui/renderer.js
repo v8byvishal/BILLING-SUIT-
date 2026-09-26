@@ -50,6 +50,8 @@ function updateCaseActions(manifest) {
 }
 async function loadCases(){const cases=await window.vnext.listCases();const body=document.getElementById('caseRows');body.replaceChildren();for(const item of cases){const row=document.createElement('tr');for(const value of [item.case_id,item.bill_number,item.workflow_status,item.updated_at,(item.review_flags||[]).join(', ')]){const cell=document.createElement('td');cell.textContent=value||'—';row.appendChild(cell);}const action=document.createElement('td');action.append(button('Open',async()=>{const result=await window.vnext.openCase(item.case_id);updateCaseActions(result.manifest);if(result.enhancementPlan)renderPlan(result.enhancementPlan);}));row.appendChild(action);body.appendChild(row);}return cases;}
 async function scanInbox(kind){const result=await window.vnext.scanInbox(kind);await loadCases();const waiting=result.files.filter(x=>x.status==='WAITING_FOR_STABLE_FILE').length;window.alert(`${kind} inbox: ${result.outcomes.length} registered, ${waiting} waiting for file stability.`);}
+async function refreshWatcher(){const value=await window.vnext.watcherStatus();text('watcherStatus',value.state);text('watcherInfo',`${value.last_scan||'No scan yet'} · queue ${value.stats.queue_size} · new ${value.stats.new_cases} · duplicate ${value.stats.duplicates} · waiting ${value.stats.waiting_for_stability} · errors ${value.stats.registration_errors}`);}
+async function watcherAction(action){await window.vnext[`watcher${action}`]();await refreshWatcher();}
 async function confirmCaseStep(kind){const operator=window.prompt('Operator identifier');if(!operator)return;const manifest=kind==='verification'?await window.vnext.confirmVerification(operator):await window.vnext.confirmDischarge(operator);updateCaseActions(manifest);await loadCases();}
 
 async function selectAndParseBill() {
@@ -254,11 +256,16 @@ async function initialize() {
     document.getElementById('saveCompletedBill').addEventListener('click', saveFinalBill);
     document.getElementById('scanInitialInbox').addEventListener('click',()=>scanInbox('initial'));
     document.getElementById('scanFinalInbox').addEventListener('click',()=>scanInbox('final'));
+    document.getElementById('watcherStart').addEventListener('click',()=>watcherAction('Start'));
+    document.getElementById('watcherPause').addEventListener('click',()=>watcherAction('Pause'));
+    document.getElementById('watcherResume').addEventListener('click',()=>watcherAction('Resume'));
+    document.getElementById('watcherStop').addEventListener('click',()=>watcherAction('Stop'));
     document.getElementById('confirmVerification').addEventListener('click',()=>confirmCaseStep('verification'));
     document.getElementById('confirmDischarge').addEventListener('click',()=>confirmCaseStep('discharge'));
     document.getElementById('runValidation').addEventListener('click',runValidation);
     await loadRegistry();
     await loadCases();
+    await refreshWatcher();
     await window.vnext.reportRendererReady();
   } catch (error) {
     text('readyStatus', 'Startup error');

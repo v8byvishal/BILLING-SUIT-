@@ -17,6 +17,7 @@ const { createReviewQueue } = require('../services/custom-codes/review-queue');
 const { CaseStore } = require('../services/cases/case-store');
 const { ActiveCaseLock } = require('../services/cases/active-case-lock');
 const { InboxScanner } = require('../services/cases/inbox-scanner');
+const { InboxWatcher } = require('../services/cases/inbox-watcher');
 const { CaseWorkflowService } = require('../services/cases/case-workflow-service');
 const { summarizeValidation, validateBill } = require('../services/validation/bill-validator');
 const { classifyDiscrepancy, saveValidation } = require('../services/validation/validation-store');
@@ -37,6 +38,7 @@ let currentCaseId = null;
 let caseStore = null;
 let caseLock = null;
 let inboxScanner = null;
+let inboxWatcher = null;
 let caseWorkflow = null;
 let currentValidationReport = null;
 const state = createAppState();
@@ -47,6 +49,7 @@ function publicConfig() {
     loggingLevel: config.logging.level,
     networkProfile: config.networkProfile,
     features: config.features,
+    automaticInboxWatch: config.automaticInboxWatch,
     version: app.getVersion()
   });
 }
@@ -73,6 +76,10 @@ function refreshCurrentPlan() {
   return currentEnhancementPlan;
 }
 
+async function processInboxCandidate(kind,file){
+  return kind==='initial' ? caseWorkflow.importInitial(file) : caseWorkflow.importFinalAutomatically(file);
+}
+
 function registerIpc() {
   ipcMain.handle('app:get-status', () => ({ ready: true, state: state.get(), version: app.getVersion() }));
   ipcMain.handle('storage:get-info', () => storageInfo);
@@ -81,7 +88,13 @@ function registerIpc() {
   ipcMain.handle('validation:select-and-run',async()=>{if(!currentBill||!currentEnhancementPlan||!currentCaseId)throw new Error('Open a parsed case before validation');const selection=await dialog.showOpenDialog(mainWindow,{title:'Select reviewed expected-results JSON',properties:['openFile'],filters:[{name:'Expected validation baseline',extensions:['json']}]});if(selection.canceled||!selection.filePaths[0])return{canceled:true};const fixture=JSON.parse(fs.readFileSync(selection.filePaths[0],'utf8'));currentValidationReport=validateBill({fixture,caseId:currentCaseId,runId:`validation-${crypto.randomUUID()}`,bill:currentBill,plan:currentEnhancementPlan});saveValidation(caseStore,currentCaseId,currentValidationReport);logger.info('Case validation completed',{caseId:currentCaseId,fixtureId:fixture.fixture_id,status:currentValidationReport.status,discrepancies:currentValidationReport.summary.discrepancies});return{canceled:false,report:currentValidationReport,summary:summarizeValidation(currentValidationReport)};});
   ipcMain.handle('validation:classify',(_event,id,decision)=>{if(!currentValidationReport)throw new Error('No validation report is active');currentValidationReport=classifyDiscrepancy(currentValidationReport,id,decision);saveValidation(caseStore,currentCaseId,currentValidationReport);return currentValidationReport;});
   ipcMain.handle('cases:open',(_event,id)=>{const manifest=caseWorkflow.openCase(id);currentCaseId=id;const initialPath=path.join(caseStore.directory(id),'normalized','initial-bill.json');const planPath=path.join(caseStore.directory(id),'enhancement','plan.json');currentBill=fs.existsSync(initialPath)?JSON.parse(fs.readFileSync(initialPath)):null;currentEnhancementPlan=fs.existsSync(planPath)?JSON.parse(fs.readFileSync(planPath)):null;currentValidationReport=null;return{manifest,bill:currentBill,enhancementPlan:currentEnhancementPlan};});
-  ipcMain.handle('inbox:scan',async(_event,kind='initial')=>{const files=inboxScanner.scan(kind);const outcomes=[];for(const file of files.filter(x=>x.status==='STABLE')){if(kind==='initial')outcomes.push(await caseWorkflow.importInitial(file));else if(currentCaseId&&caseStore.load(currentCaseId).workflow_status==='FINAL_BILL_REQUIRED')outcomes.push(await caseWorkflow.attachFinal(currentCaseId,file,currentEnhancementPlan,currentExecutionAudit));}return{files,outcomes,cases:caseStore.list()};});
+  ipcMain.handle('inbox:scan',async(_event,kind='initial')=>{const files=inboxScanner.scan(kind);const outcomes=[];for(const file of files.filter(x=>x.status==='STABLE'))outcomes.push(await processInboxCandidate(kind,file));return{files,outcomes,cases:caseStore.list()};});
+  ipcMain.handle('watcher:status',()=>inboxWatcher.status());
+  ipcMain.handle('watcher:start',()=>inboxWatcher.start());
+  ipcMain.handle('watcher:pause',()=>inboxWatcher.pause());
+  ipcMain.handle('watcher:resume',()=>inboxWatcher.resume());
+  ipcMain.handle('watcher:stop',()=>inboxWatcher.stop());
+  ipcMain.handle('watcher:scan-now',()=>inboxWatcher.scanNow());
   ipcMain.handle('bill:select-and-parse', async () => {
     const selection = await dialog.showOpenDialog(mainWindow, {
       title: 'Select hospital bill PDF',
@@ -216,8 +229,11 @@ async function bootstrap() {
     logger = createLogger({ logsDir: path.join(storagePath, 'Logs'), level: config.logging.level, source: 'desktop-main' });
     customCodeRegistry = new CustomCodeRegistry(storagePath);
     rebuildRateRepository();
-    caseStore=new CaseStore(storagePath);caseLock=new ActiveCaseLock(storagePath);inboxScanner=new InboxScanner(storagePath);
+    caseStore=new CaseStore(storagePath);caseLock=new ActiveCaseLock(storagePath);inboxScanner=new InboxScanner(storagePath,{minAgeMs:Math.max(config.automaticInboxWatch.stabilityWindowMs,config.automaticInboxWatch.minimumFileAgeMs)});
     caseWorkflow=new CaseWorkflowService({store:caseStore,lock:caseLock,rateRepository,registrySnapshot:()=>customCodeRegistry.snapshot(),storageRoot:storagePath});
+    const watcherAuditFile=path.join(storagePath,'Logs','inbox-watcher.jsonl');
+    inboxWatcher=new InboxWatcher({scanner:inboxScanner,processCandidate:processInboxCandidate,intervalMs:config.automaticInboxWatch.pollingIntervalMs,maxQueue:config.automaticInboxWatch.maximumQueueSize,concurrency:config.automaticInboxWatch.backgroundConcurrency,audit:event=>fs.appendFileSync(watcherAuditFile,`${JSON.stringify(event)}\n`,{mode:0o600})});
+    if(config.automaticInboxWatch.enabled)inboxWatcher.start();
     const recoveredCases=caseWorkflow.interruptPortalCases();
     logger.info('Application startup', {
       appDir: APP_DIR,
@@ -253,5 +269,5 @@ process.on('unhandledRejection', (error) => { surfaceFatal(error); app.exit(1); 
 app.whenReady().then(bootstrap);
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
-  try { if(caseLock?.token)caseLock.release(); logger?.info('Application shutdown requested', { state: state.get(),caseId:currentCaseId }); } catch (_) { /* controlled best effort */ }
+  try { inboxWatcher?.stop(); if(caseLock?.token)caseLock.release(); logger?.info('Application shutdown requested', { state: state.get(),caseId:currentCaseId }); } catch (_) { /* controlled best effort */ }
 });
