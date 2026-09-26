@@ -1,0 +1,7 @@
+{
+  "cases": [
+    {"id":"oxygen-half-day","description":"HALF DAY oxygen","expected_quantity":12,"expected_status":"RULE_VERIFIED"},
+    {"id":"oxygen-full-day","description":"FULL DAY oxygen","expected_quantity":24,"expected_status":"RULE_VERIFIED"},
+    {"id":"oxygen-ambiguous","description":"HALF DAY and FULL DAY oxygen","expected_quantity":null,"expected_status":"REVIEW_REQUIRED"}
+  ]
+}

@@ -2,61 +2,65 @@
 
 ## Current phase
 
-**Phase 4 — Legacy Portal Enhancement Boundary: complete for review.**
+**Phase 5 — Production PDF Regression, Parser Accuracy Hardening & Enhancement Validation: complete for review.**
 
-The Phase 3 `EnhancementPlan` now crosses a narrow safety adapter into the existing Python Selenium/Chrome-CDP executor. No second browser engine or competing business-rule layer was created. Live validation: **NOT RUN — LIVE PORTAL REQUIRED**.
+Phase 1–4 architecture remains intact. Phase 5 patches the existing Phase 2 parser and Phase 3 plan only; it adds no parser replacement, Selenium engine, settlement, discharge, final-bill upload, storage automation, or unrelated UI.
 
-## Implemented flow
+## Real PDF status
 
-`Phase 2 BillDocument → Phase 3 EnhancementPlan → plan-adapter.js → portal-execution-service.js → python-runner.js → portal_bridge.py → app (1).py BatchAutomationThread/TreatmentPlanOrchestrator → CDP 127.0.0.1:9222 → portal-state verification → structured audit`
+The conversation listed `38222.pdf`, `40343.pdf`, `39951.pdf`, and `40332.pdf` as attachments, but `/home/user/uploads` and repository searches contained none of those files during implementation. Therefore:
 
-- `src/adapters/legacy-portal/plan-adapter.js` accepts only `SOURCE_VERIFIED`/`RULE_VERIFIED` entries with valid code and positive integer final quantity. It passes evidence, source/rule, classification, derived flag, and audit metadata.
-- Unknown, unresolved compound, undefined-rule, review-required, malformed, unsupported, rejected, and Patient Payable/excluded content remains blocked and auditable.
-- `python-runner.js` provides a JSON child-process boundary and parses a final `VNEXT_RESULT=` marker while preserving stdout/stderr.
-- `portal_bridge.py` validates the contract and invokes the existing `BatchAutomationThread`; it contains no selectors or CGHS rules.
-- Minimal additive instrumentation in `app (1).py` exposes verified per-action `EXECUTED`, `ALREADY_PRESENT`, and `FAILED` records, including reconciliation, diagnostics, CDP retries, and fatal failures. Existing PyQt behavior and portal implementation remain in place.
-- `portal-execution-service.js` merges blocked records and executor outcomes, rejects missing/invalid terminal records as `UNKNOWN`, and reports `PARTIAL` for mixed outcomes.
+**REAL PDF REGRESSION = NOT RUN**
 
-CN002, CC001, WC001, and CC002 calculations remain solely in Phase 3. Selenium receives final quantities and never guesses codes, compounds, or rules. Portal success requires verified state; duplicate rows remain `ALREADY_PRESENT`.
+No real-PDF result is claimed. Synthetic, de-identified production-structure fixtures are under `tests/fixtures/bills/`, with a documented path for adding reviewed real fixtures later.
 
-## UI and security
+## Parser hardening
 
-The Electron allowlist now exposes portal preview and execute operations. The minimal UI shows executable/blocked counts, requires user confirmation, displays terminal verification counts, and renders the audit. The executor still attaches only to an already authenticated Chrome debugging session at `127.0.0.1:9222`; credentials, login, and security bypass are not automated.
+- Added `logical-row-builder.js`, which joins only explicit labeled code fields proven to continue on the immediate next line.
+- Extended code syntax to retain repeated qualifiers such as `B042+043+044` and narrowly normalize spaces such as `B 126` only inside evidenced code tokens.
+- Preserved raw expressions, contributing source lines, page, section, normalization decision, and plan provenance.
+- Restricted unlabeled extraction to standalone/delimiter-bounded code cells so code-like prose does not become an enhancement candidate.
+- Added advisory `POSSIBLY_MISSING_CODE` / `REVIEW_REQUIRED` for structured service+quantity rows without a code; no code is generated or guessed.
+- Kept Patient Payable exclusion before aggregation. Duplicate aggregation continues across pages/repeated headers only within the same semantic section type.
+- Added explicit EnhancementPlan `execution_summary` categories: executable, blocked, and review-required. This is additive to the existing plan contract.
+- Existing CN002, CC001, WC001, and CC002 rules are unchanged and still consume structured evidence.
+- The Phase 4 adapter remains the only browser-bound safety gate and remains compatible.
 
-## Rate-source status
+## Fixtures and regression coverage
 
-The 1,998-record `src/services/cghs/data/hfos-reference-rates.json` snapshot remains **`RATE_SOURCE_UNDEFINED`**. It is not official and cannot produce authoritative financial amounts. No fabricated authority was added.
+Human-readable synthetic fixtures:
+
+- `tests/fixtures/bills/production-structure.json`
+- `tests/fixtures/bills/oxygen-cases.json`
+- `tests/fixtures/bills/stale-bill-b.json`
+- `tests/fixtures/bills/README.md`
+
+Phase 5 adds 24 deterministic cases covering multi-page duplicates, primary/Patient Payable pharmacy separation, ICU/ward special rules, oxygen half/full/ambiguous outcomes, `+L` compounds, repeated-plus compound syntax, wrapped codes, unknown/malformed/undefined outcomes, false-positive prose, repeated headers, continuation pages, 1,000-row volume, mixed executable/blocked plans, missing-code review, state isolation, and Phase 4 adapter compatibility.
+
+## Rate source
+
+The bundled 1,998-record snapshot remains **`RATE_SOURCE_UNDEFINED`**. It is not official, no entry is fabricated, and similar-looking codes are never substituted.
 
 ## Validation
 
-- `npm test`: **39 passed, 0 failed** (Phase 1–4).
-- Phase 4 includes 14 deterministic fake-runner cases covering verified success, already-present duplicates, failure, partial execution, CDP/runner failure, missing/invalid outcomes, retries/diagnostics, post-exception reconciliation, unsafe blocking, Patient Payable exclusion, malformed input, deterministic special-code ordering/final quantities, and audit identity.
-- JavaScript syntax checks passed for all changed JavaScript modules.
-- Python syntax checks passed for `app (1).py` and `portal_bridge.py`.
+- Before Phase 5: **39 tests**.
+- After Phase 5: `npm test` — **63 passed, 0 failed, 0 skipped**.
+- Phase 5 additions: **24 deterministic tests**.
+- JavaScript syntax checks over every `src/**/*.js`: passed.
+- Python syntax checks for the existing Phase 4 modified files `app (1).py` and `portal_bridge.py`: passed; Phase 5 changed no Python.
 - `git diff --check`: passed.
-- Live validation: **NOT RUN — LIVE PORTAL REQUIRED**.
-- Real PDF validation: **REAL_FIXTURES_UNAVAILABLE**.
+- `npm audit --omit=dev`: **0 vulnerabilities**.
+- Automated testing: completed.
+- Real PDF regression: **NOT RUN** because the named attachments were not present in the workspace filesystem.
+- Live portal testing: **NOT RUN — LIVE PORTAL REQUIRED**.
 
-## Explicit boundaries
-
-Settlement/Reconciliation remains isolated under `src/services/settlement/` and was not imported or modified. Final bill processing/upload, attachments, discharge workflow, automatic folder pickup, pharmacy/OT consumables, credential storage, and broad legacy refactoring remain out of scope.
-
-## Unresolved issues
-
-- No authenticated live CGHS portal/Chrome debugging session was available.
-- No genuine bill PDFs were available.
-- Official current CGHS rate authority remains unavailable.
-- Compound `+L`, HDU classification, scanned/OCR bills, and portal amount semantics remain unresolved.
-- Electron runtime smoke installation remains environment-blocked by prior TLS/network download failures.
-
-## Git state
+## Git
 
 - Branch: `arena/01a0de46-billing-suit`
-- Phase 3 implementation: `da0b0bd`
-- Phase 3 documentation: `3a86628`
+- Phase 4 commit: `a061209`
 - PR #1 remains open and must not be merged automatically.
-- Phase 4 implementation/documentation commit is pending at the time this memory entry was written.
+- Phase 5 commit is pending at the time of this entry.
 
 ## Stop point
 
-Stop after Phase 4 review delivery. Do not begin Phase 5 or later work automatically.
+Stop after Phase 5. Do not begin discharge, final bill, consumables production, automatic storage, or Settlement/Reconciliation work.

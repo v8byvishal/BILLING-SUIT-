@@ -73,6 +73,7 @@ function parseItemLine(entry, section) {
     reference_number: reference,
     payer_information: null,
     raw_source_context: entry.text,
+    source_lines: entry.source_lines || [{ page_number: entry.page_number, line_number: entry.line_number, text: entry.text }],
     normalization_status: code.normalization_status
   };
 }

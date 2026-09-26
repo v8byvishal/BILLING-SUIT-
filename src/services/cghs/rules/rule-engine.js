@@ -18,7 +18,10 @@ function provenanceForAggregate(bill, aggregate) {
     source_page: item.source_page,
     source_section: item.section,
     raw_source_context: item.raw_source_context,
-    raw_code_expression: item.raw_code_expression
+    raw_code_expression: item.raw_code_expression,
+    normalized_value: item.code_normalization?.normalized_expression || null,
+    source_lines: item.source_lines || [],
+    parser_decision: item.normalization_status
   }));
 }
 
@@ -151,8 +154,25 @@ function evaluateBill(bill, rateRepository) {
   addDerived(plan, evaluateCc002(bill.items || []), rateRepository);
   for (const token of bill.parsing_audit?.rejected_tokens || []) plan.rejected_candidates.push({
     code: token.raw, source_page: token.page, source_section: token.section || null,
+    raw_source_context: token.raw, parser_decision: token.parser_decision || 'INVALID_FORMAT',
     status: 'INVALID_FORMAT', reason: token.reason, rule_id: 'PHASE2_SYNTAX_VALIDATION', action: 'REVIEW_REQUIRED'
   });
+  for (const candidate of bill.parsing_audit?.review_candidates || []) plan.rejected_candidates.push({
+    code: null, source_page: candidate.page, source_section: candidate.section || null,
+    raw_source_context: candidate.raw, parser_decision: candidate.parser_decision,
+    status: 'REVIEW_REQUIRED', reason: candidate.reason, rule_id: 'PHASE2_MISSING_CODE_ADVISORY', action: 'REVIEW_REQUIRED'
+  });
+  const executableStatuses = new Set(['SOURCE_VERIFIED', 'RULE_VERIFIED']);
+  for (const entry of plan.entries) {
+    const reference = { code: entry.code, quantity: entry.quantity, status: entry.status, source: entry.source, rule_id: entry.rule_id || null, provenance: entry.provenance || [] };
+    if (executableStatuses.has(entry.status)) plan.execution_summary.executable.push(reference);
+    else if (entry.status === 'REVIEW_REQUIRED' || entry.status === 'RULE_UNDEFINED') plan.execution_summary.review_required.push(reference);
+    else plan.execution_summary.blocked.push(reference);
+  }
+  for (const candidate of plan.rejected_candidates) {
+    const target = candidate.action === 'REVIEW_REQUIRED' ? plan.execution_summary.review_required : plan.execution_summary.blocked;
+    target.push(candidate);
+  }
   if (!rateRepository.isFinanciallyAuthoritative()) plan.warnings.push('RATE_SOURCE_UNDEFINED');
   return plan;
 }

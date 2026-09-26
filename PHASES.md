@@ -7,7 +7,7 @@
 | 2 | Bill ingestion, parser, normalized bill model | Complete; real-bill fixtures still unavailable |
 | 3 | CGHS rate-source layer and deterministic rule engine | Implemented; awaiting review, official rate source, and real-bill fixtures |
 | 4 | Portal enhancement automation | Complete; deterministic mocks passed, live validation requires authenticated portal |
-| 5 | Enhancement verification workflow/UI | Not started |
+| 5 | Production PDF regression, parser accuracy hardening, and enhancement validation | Complete with synthetic fixtures; real PDFs unavailable to workspace |
 | 6 | Final bill extraction and composition | Not started |
 | 7 | Storage, recovery, logs, auditability hardening | Not started |
 | 8 | Performance and reliability optimization | Not started |

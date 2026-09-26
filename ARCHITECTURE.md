@@ -101,6 +101,16 @@ The adapter passes structured code, final quantity, evidence, rule/reason, class
 
 Electron exposes allowlisted preview and explicit execute IPC calls. The UI shows executable/blocked counts, requires confirmation, reports verification/status, and renders the structured audit. It never handles credentials or login. Settlement/Reconciliation is not imported.
 
+## Phase 5 parser hardening
+
+Phase 5 retains the Phase 2 architecture and adds a conservative logical-row step between section detection and item parsing. It joins only a labeled code field whose syntax proves that the code continues on the immediately following line. General adjacent text is never merged.
+
+Code extraction now accepts repeated compound qualifiers and narrowly evidenced letter/digit spacing while preserving the raw expression and contributing source lines. Unlabeled code-like text is accepted only as a standalone or delimiter-bounded table cell, preventing references embedded in descriptions from becoming actions. No fuzzy/nearest-code matching or blacklist is used.
+
+Aggregation remains scoped by semantic section type after Patient Payable exclusion and works across repeated headers and continuation pages. Structured Bed Details remains the preferred input to unchanged CN002/CC001/WC001 rules. Strongly structured service/quantity rows with no code become `REVIEW_REQUIRED` advisories with no generated code. The EnhancementPlan includes an explicit executable/blocked/review summary without creating a second plan contract.
+
+Synthetic fixtures under `tests/fixtures/bills/` cover production-like structures and do not contain patient data. Named real PDFs were not accessible in the workspace, so real-PDF regression is not claimed.
+
 ## Development and packaging
 
 - Install pinned dependencies: `npm install`

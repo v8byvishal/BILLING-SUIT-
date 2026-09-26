@@ -21,8 +21,8 @@ function parseComponent(raw) {
 
 function parseCompoundCode(rawExpression) {
   const raw = String(rawExpression || '').trim();
-  const normalizedExpression = raw.toUpperCase().replace(/\s*([/+])\s*/g, '$1').replace(/\s+/g, ' ');
   const parts = raw.split(/\s*\/\s*/).filter(Boolean).map(parseComponent);
+  const normalizedExpression = parts.map((part) => part.normalized).join('/');
   const compound = parts.length > 1 || parts.some((part) => part.qualifiers.length > 0);
   return {
     raw_code_expression: raw,

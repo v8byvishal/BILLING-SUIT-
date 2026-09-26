@@ -1,0 +1,5 @@
+{
+  "source":{"file_name":"stale-bill-b.pdf","sha256":"synthetic-b"},
+  "pages":[{"page_number":1,"lines":["Bill No: BILL-B","Investigations","Service: Bill B only | Code: B068 | Qty: 1"],"raw_text":"Bill No: BILL-B\nInvestigations\nService: Bill B only | Code: B068 | Qty: 1"}],
+  "expected":{"bill_number":"BILL-B","codes":["B068"]}
+}

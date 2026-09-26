@@ -41,6 +41,16 @@ Phase 4 does not add business rules. It accepts only the final Phase 3 `Enhancem
 
 The existing Python Selenium executor remains authoritative for procedure search, speciality synchronization, quantity/locked-field handling, duplicate guards, recovery, diagnostics, reconciliation, and portal-row verification. Success is only `EXECUTED` after verified portal state or `ALREADY_PRESENT` after reconciliation; clicks and absence of exceptions are insufficient. Failures, unknown outcomes, blocked records, review records, and partial batches remain explicit.
 
+## Phase 5 parsing policy
+
+- Wrapped rows are joined only when an explicit code label ends in an incomplete expression and the immediate next line is syntactically a code continuation.
+- OCR spacing is normalized only inside an evidenced code token; raw text and all source lines remain available.
+- Repeated `+` components are tokenized but their semantics remain `RULE_UNDEFINED`; no compound expansion is inferred.
+- Code-like references embedded in prose are not candidates. No valid-code blacklist and no nearest-rate-code guessing is permitted.
+- A structured service row with quantity but no code becomes `REVIEW_REQUIRED` / `POSSIBLY_MISSING_CODE`; the parser never inserts a code.
+- Duplicate aggregation remains separated by semantic section and happens only after Patient Payable exclusion.
+- CN002, CC001, WC001, and CC002 meanings are unchanged.
+
 ## Prohibited scope
 
 No second Selenium engine, selector duplication, credential/login automation, security bypass, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented. Settlement remains isolated under `src/services/settlement/`.

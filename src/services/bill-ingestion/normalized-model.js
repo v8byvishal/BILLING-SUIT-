@@ -28,6 +28,7 @@ function createBillDocument({ source, pages }) {
       compound_expressions: [],
       excluded_patient_payable_sections: [],
       rejected_tokens: [],
+      review_candidates: [],
       transformations: [],
       warnings: []
     }
