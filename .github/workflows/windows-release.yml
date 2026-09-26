@@ -18,8 +18,12 @@ jobs:
       - name: Build and verify Windows release
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1 *>&1 | Tee-Object -FilePath build-log.txt
-          exit $LASTEXITCODE
+          $ErrorActionPreference = 'Continue'
+          powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1 *> build-log.txt
+          $code = $LASTEXITCODE
+          Get-Content build-log.txt
+          Write-Host "EXIT_CODE=$code"
+          exit $code
       - name: TEMP diagnostics on failure
         if: failure()
         shell: powershell
