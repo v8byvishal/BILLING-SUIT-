@@ -39,7 +39,7 @@ button.primary:hover { background:var(--blue-dark); }
 .eyebrow { margin:0 0 2px; color:var(--blue); font-weight:750; font-size:11px; letter-spacing:.14em; text-transform:uppercase; }
 h1 { margin:0; font-size:28px; letter-spacing:-.03em; }
 .header-actions, .actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
-.status-strip { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:1px; overflow:hidden; border:1px solid var(--line); border-radius:10px; background:var(--line); }
+.status-strip { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:1px; overflow:hidden; border:1px solid var(--line); border-radius:10px; background:var(--line); }
 .status-strip div { min-width:0; background:var(--surface); padding:11px 12px; }
 .status-strip span { display:block; color:var(--muted); font-size:11px; }
 .status-strip strong { display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }

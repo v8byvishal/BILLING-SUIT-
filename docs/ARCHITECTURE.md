@@ -1,8 +1,8 @@
-# Architecture — Phase 3 Source PDF Ingestion and Parser Evidence
+# Architecture — Phase 4 Registry and Deterministic Resolution
 
-CGHS Billing & Enhancement Suite V2 remains a local vanilla Electron/JavaScript desktop application. Phase 3 adds source PDF ingestion and parser evidence extraction on top of the Phase 2 external Storage foundation.
+CGHS Billing & Enhancement Suite V2 remains a local vanilla Electron/JavaScript desktop application. Phase 4 adds a registry/rule-resolution layer after Phase 3 parser evidence extraction.
 
-## Runtime boundary
+## Boundary diagram
 
 ```text
 Renderer UI
@@ -12,117 +12,99 @@ Preload bridge
 Electron main process
   ↓ controlled service calls
 StorageService
-  ↓ immutable source artifact
+  ↓ immutable source artifact and persisted parser result
 Source parser
-  ↓ parse-result evidence JSON
-Existing domain services and adapters
+  ↓ parser evidence candidates
+CGHS registry + deterministic resolver
+  ↓ ResolutionResult JSON
+Existing EnhancementPlan / portal / final-bill services remain separate
 ```
 
-Renderer code must not access arbitrary filesystem APIs, child processes, Python, Selenium, Storage folder manipulation, source PDF bytes, or CGHS rule logic.
+Renderer code must not access arbitrary filesystem APIs, child processes, Python, Selenium, registry files, source PDF bytes, Storage folder manipulation, or CGHS rule internals.
 
 ## Source lifecycle
 
 1. Operator selects a PDF.
 2. Main process imports it through `StorageService.importSourceBill()`.
 3. StorageService writes `Storage/Source_Bills/<billSessionId>/source.pdf` and `metadata.json`.
-4. Parser reads the stored immutable copy, not a transient developer-relative file.
+4. Parser reads the stored immutable copy.
 5. Parser writes `parse-result.json` next to the source artifact.
-6. Audit/failure records are written under `Storage/Audit` and `Storage/Failures`.
-7. UI reads summaries and parse result through controlled IPC.
+6. Resolver reads parser candidates and active registry/rule set.
+7. Resolver writes `resolution-result.json` next to the parser result.
+8. UI previews parser candidates and resolution results.
 
-## Parser service
+## Registry service
 
-`src/services/bill-ingestion/source-parser.js` owns the Phase 3 parser pipeline:
+`src/services/cghs/registry.js` owns:
 
-- PDF validation/open through existing `pdf-loader.js` / `pdfjs-dist`;
-- page model creation;
-- conservative text normalization;
-- section detection;
-- parenthesized `Description (CODE)` candidate extraction;
-- source-derived quantity extraction;
-- evidence/provenance capture;
-- status timeline and parser metrics;
-- stored-source parsing helper.
+- registry schema;
+- source hierarchy;
+- source hash calculation;
+- JSON/CSV import;
+- conversion of legacy `records[]` rate snapshots;
+- registry validation;
+- effective-date-aware exact lookup;
+- active registry persistence;
+- registry status summary for UI/diagnostics.
 
-Parser version: `3.0.0`.
-
-## Page model
-
-```json
-{
-  "pageNumber": 1,
-  "rawText": "...",
-  "normalizedText": "...",
-  "extractionStatus": "OK"
-}
-```
-
-Pages are not silently omitted on successful extraction.
-
-## Section model
-
-Sections contain:
-
-- `sectionType`
-- `pageStart`
-- `pageEnd`
-- `confidence`
-- `status`
-- `evidence`
-
-Unknown text remains `UNKNOWN_SECTION` and is not force-fit.
-
-## Candidate model
-
-Candidates contain:
-
-- `candidateId`
-- `billSessionId`
-- `runId`
-- `pageNumber`
-- `section`
-- `description`
-- `rawText`
-- `codeRaw`
-- `codeNormalizedCandidate`
-- `quantityRaw`
-- `quantityNormalized`
-- `unit`
-- `evidence`
-- `confidence`
-- `status`
-
-Candidate output is evidence only. It is not an EnhancementPlan and is not executable.
-
-## Regression policy
-
-The parser supports documented parenthesized code layouts, including same-line and wrapped-line `Description (CODE)`. The code pattern is intentionally constrained to avoid false positives such as `(1234)`, `(ABCD)`, and `(C123456)`.
-
-No global alias transform is performed. `C008` remains `C008` in parser evidence.
-
-## Persistence
-
-Parser output is stored at:
+## Registry paths
 
 ```text
-Storage/Source_Bills/<billSessionId>/parse-result.json
+Storage/CGHS/registries/
+Storage/CGHS/rules/
+Storage/CGHS/validation/
+Storage/CGHS/active-registry.json
 ```
 
-It includes parser version, run id, status, page count, candidate count, warnings, pages, sections, candidates, metrics, and status timeline.
+Runtime registry data belongs in external Storage, not in the Electron installation directory.
 
-## Audit/failure behavior
+## Resolver service
 
-Audit events:
+`src/services/cghs/rule-resolution.js` owns:
 
-- `SOURCE_BILL_IMPORT`
-- `PDF_PARSE_STARTED`
-- `PDF_PARSE_COMPLETED`
-- `PDF_PARSE_WARNING`
-- `PDF_PARSE_FAILED`
-- `PARSER_ZERO_CANDIDATES`
+- `RULE_SET_VERSION = "4.0.0"`;
+- explicit rule objects;
+- deterministic rule handlers;
+- conflict detection;
+- raw alias protection;
+- Phase 3 parser integration;
+- resolution run summaries.
 
-Failure artifacts are sanitized and do not duplicate full PDFs.
+The resolver is conservative: unresolved, unverified, ambiguous, stale/date-unknown, fuzzy, and conflicting evidence remains review-required.
 
-## Real PDF status
+## Resolution persistence
 
-No real hospital-bill PDF fixture is available in this checkout. Phase 3 validation uses synthetic non-PHI PDFs generated by tests and golden expected JSON.
+```text
+Storage/Source_Bills/<billSessionId>/resolution-result.json
+```
+
+The persisted result includes registry version, registry source hash, rule-set version, selected rule or registry entry, status, reason, evidence, and conflicts.
+
+## UI / IPC additions
+
+Controlled IPC/preload operations:
+
+- `registry.getStatus()`
+- `resolution.getStatus()`
+- `resolution.getResult(billSessionId)`
+
+UI additions:
+
+- Registry status in Settings/status strip.
+- Resolution summary in persisted Source Bills list.
+- Resolution preview in Enhancement workspace.
+
+These UI rows are not portal-executable actions.
+
+## Official data status
+
+No approved official CGHS master/rate source exists in this checkout. The bundled HFOS snapshot is machine-readable but unverified. It can provide traceability and candidate review, not direct executable authority.
+
+## Security
+
+- Registry fields are data only.
+- No JavaScript evaluation from registry/rule files.
+- No shell execution.
+- No external API lookup during normal resolution.
+- No source PDF full-text dump into audit.
+- No portal automation call from Phase 4.

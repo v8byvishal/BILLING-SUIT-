@@ -2,7 +2,7 @@
 
 CGHS Billing & Enhancement Suite V2 should feel like a professional hospital billing workstation: clear, calm, evidence-oriented, and safe under time pressure. It is not an AI-chat interface, decorative consumer application, or unverified automation console.
 
-For Phase 3 parser UI specifics, see `docs/DESIGN.md`.
+For detailed Phase 4 UI behavior, see `docs/DESIGN.md`.
 
 ## Current shell behavior
 
@@ -12,38 +12,38 @@ The desktop shell is implemented with vanilla HTML/CSS/JavaScript in:
 - `src/ui/renderer.js`
 - `src/ui/styles.css`
 
-Phase 3 keeps the existing navigation and adds real parser evidence presentation in the Source Bills workspace.
+Phase 4 keeps the existing navigation and adds registry status plus deterministic resolution preview.
 
 Primary sections:
 
-1. **Dashboard** — application state, Storage root, Storage health/manifest/write-probe state, active bill, parser summary, enhancement, portal, and final-bill state.
-2. **Source Bills** — source PDF selection, persisted source records, parser status, candidate count, warnings, candidate table, and candidate evidence.
-3. **Enhancement** — existing plan visibility only when later services create a plan; parser candidates are not executable actions.
-4. **Final Bill** — workspace structure and access to `Storage/Final_Bills`; no fake final PDF generation.
+1. **Dashboard** — application state, Storage root, active bill, registry status, resolution summary, portal and final-bill status.
+2. **Source Bills** — source PDF selection, persisted source records, parser status, candidates, evidence, and resolution summary.
+3. **Enhancement** — Phase 4 resolution preview only; not an executable portal action table.
+4. **Final Bill** — workspace structure; no final PDF generation in Phase 4.
 5. **Audit / History** — persistent audit records from `Storage/Audit` and safe links to Audit/Failures folders.
-6. **Settings** — non-secret settings under `Storage/Config` and actual Storage root display.
-7. **Diagnostics** — safe technical status including manifest, recovery, health, and parser/storage information.
+6. **Settings** — non-secret settings and Registry status/version/source/hash/rule counts.
+7. **Diagnostics** — safe technical status including Storage, parser, registry, and resolution information.
 
-## Source Bills UI states
+## Resolution preview states
 
-- No PDF: “Upload a source bill to begin.”
-- PDF imported/parsing: parser status shows `READING` or current stored status.
-- Parsed with candidates: candidate table displays page, section, description, code, quantity, and candidate status.
-- Parsed without candidates: “PDF parsed successfully, but no candidate enhancement entries were detected.”
-- Failed: “Source PDF could not be parsed.”
-
-The UI must never show parser candidates as executable portal actions.
+- No source: “Upload a source bill to begin.”
+- Parsed without resolution: “No resolution preview available.”
+- Validated mapping: `VALIDATED_MAPPING`, with rule id and evidence.
+- Direct registry match: `DIRECT_REGISTRY_MATCH`, with registry entry id and authority.
+- Review required: `REVIEW_REQUIRED`, with reason and missing/conflicting evidence.
+- Conflict: `RULE_CONFLICT`, with conflicts listed in diagnostics/evidence.
+- Rejected/no match: `REJECTED` or `NO_MATCH`, never converted to a portal action.
 
 ## Candidate evidence display
 
-Selecting a candidate shows its evidence block, including page number, source section, source text, and line numbers where available. Exact character offsets are shown only if actually produced; Phase 3 does not invent offsets.
+Source Bills continues to show parser candidate evidence. Enhancement shows resolver evidence and reason. Exact source text snippets may appear for selected candidates, but the UI must not dump full PDF text into diagnostics or audit panels.
 
 ## Visual personality
 
 - Professional and operational.
-- Low-noise and readable at Windows desktop distances.
-- Explicit about uncertainty, missing data, blocked work, and manual responsibility.
 - Evidence-first rather than promotional.
+- Explicit about uncertainty, missing data, blocked work, and review-required results.
+- Conservative: unresolved status is a valid, safe outcome.
 
 ## Current theme tokens
 
@@ -59,17 +59,17 @@ Selecting a candidate shows its evidence block, including page number, source se
 | Border/divider | `#d9e1e8` | Panel and table structure |
 | Primary action | `#215a86` | Main actions |
 | Primary hover | `#174665` | Main-action hover |
-| Success/ready | `#23785a` | Ready/success status |
-| Warning/review | `#8a6218` | Review, ambiguous, and not-verified status |
-| Error/corrupt/access failure | `#a13d3d` | Error, corrupt, read-only, access-failure, and parse-failure status |
+| Success/ready | `#23785a` | Ready, active, validated status |
+| Warning/review | `#8a6218` | Partial, review-required, no-match, not-verified status |
+| Error/conflict | `#a13d3d` | Failed, invalid, rejected, conflict, access-failure status |
 
 Status meaning must always include text and must not rely on color alone.
 
 ## Interaction rules
 
-- Renderer actions call `window.cghsSuite`; no direct Node, shell, Python, Selenium, or arbitrary filesystem access is permitted.
+- Renderer actions call `window.cghsSuite`; no direct Node, shell, Python, Selenium, registry-file, or arbitrary filesystem access is permitted.
 - Folder opening is limited to allowlisted Storage folder keys.
-- Selecting a source bill persists the file first, parses from the stored immutable copy, and associates results with one `billSessionId` and `runId`.
-- Resetting the current bill clears active UI/workflow state only; it never deletes persisted files, parse results, audit, failure, or session records.
-- Portal readiness remains `NOT VERIFIED` in Phase 3.
-- Unsupported capabilities are shown as not started or not enabled; the UI must not fake parser output, portal readiness, final PDFs, metrics, or dashboards.
+- Selecting a source bill persists the file first, parses from the stored immutable copy, and resolves parser candidates through the active registry/rule set.
+- Resetting the current bill clears active UI/workflow state only; it never deletes persisted files, parse results, resolution results, audit, failure, registry, or session records.
+- Portal readiness remains `NOT VERIFIED` in Phase 4.
+- Unsupported capabilities are shown as not started, blocked, or not verified; the UI must not fake parser output, registry authority, portal readiness, final PDFs, metrics, or dashboards.

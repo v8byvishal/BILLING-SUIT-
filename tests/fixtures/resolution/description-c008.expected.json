@@ -1,0 +1,11 @@
+{
+  "input": {
+    "description": "Blood Transfusion Charge",
+    "codeRaw": "C008"
+  },
+  "expected": {
+    "status": "VALIDATED_MAPPING",
+    "finalCode": "CC008",
+    "ruleId": "CGHS_C_008_BLOOD_TRANSFUSION"
+  }
+}

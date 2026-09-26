@@ -29,6 +29,10 @@ const COMPATIBILITY_STORAGE_FOLDERS = Object.freeze([
   'Failed',
   'Reports',
   'Custom_Codes',
+  'CGHS',
+  'CGHS/registries',
+  'CGHS/rules',
+  'CGHS/validation',
   'Bills',
   'Inbox',
   'Inbox/Initial',
@@ -93,7 +97,9 @@ function sanitizeRecord(value) {
   if (value == null) return null;
   try {
     return JSON.parse(JSON.stringify(value, (key, item) => {
-      if (/password|credential|cookie|token|secret|api[_-]?key|auth/i.test(key)) return '[REDACTED]';
+      const lowerKey = String(key || '').toLowerCase();
+      const isAuthorityMetadata = ['authoritystatus', 'authority_status', 'rateauthority', 'registryauthority'].includes(lowerKey);
+      if (!isAuthorityMetadata && /password|credential|cookie|token|secret|api[_-]?key|authorization|authentication|^auth$|auth[_-]?token/i.test(key)) return '[REDACTED]';
       if (typeof item === 'function') return undefined;
       return item;
     }));
@@ -497,8 +503,14 @@ class StorageService {
       for (const id of fs.readdirSync(sourceRoot)) {
         const candidate = path.join(sourceRoot, id, 'metadata.json');
         if (fs.existsSync(candidate)) files.push(candidate);
+        const parse = path.join(sourceRoot, id, 'parse-result.json');
+        if (fs.existsSync(parse)) files.push(parse);
+        const resolution = path.join(sourceRoot, id, 'resolution-result.json');
+        if (fs.existsSync(resolution)) files.push(resolution);
       }
     }
+    const activeRegistry = path.join(this.assertRoot(), 'CGHS', 'active-registry.json');
+    if (fs.existsSync(activeRegistry)) files.push(activeRegistry);
     return files.filter((file, index, array) => array.indexOf(file) === index && fs.existsSync(file));
   }
 
@@ -614,6 +626,14 @@ class StorageService {
     return this.resolveManagedPath(path.join('Source_Bills', safeName(billSessionId)));
   }
 
+  getCghsDirectory() {
+    return this.resolveManagedPath('CGHS');
+  }
+
+  getSourceBillResolutionPath(billSessionId) {
+    return path.join(this.getSourceBillDirectory(billSessionId), 'resolution-result.json');
+  }
+
   getSourceBillRecord(billSessionId, options = {}) {
     const directory = this.getSourceBillDirectory(billSessionId);
     const metadataFile = path.join(directory, 'metadata.json');
@@ -644,6 +664,20 @@ class StorageService {
     return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, result: loaded.value };
   }
 
+  writeResolutionResult(billSessionId, resolutionResult) {
+    const directory = this.getSourceBillDirectory(billSessionId);
+    fs.mkdirSync(directory, { recursive: true });
+    const file = this.getSourceBillResolutionPath(billSessionId);
+    this.writeJson(file, resolutionResult);
+    return { status: OPERATION_STATUS.SUCCESS, path: file, result: resolutionResult };
+  }
+
+  readResolutionResult(billSessionId) {
+    const loaded = this.readJson(this.getSourceBillResolutionPath(billSessionId), { fallback: null, preserveCorrupt: true });
+    if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
+    return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, result: loaded.value };
+  }
+
   listSourceBills(options = {}) {
     const root = this.getFolderPath('Source_Bills');
     if (!fs.existsSync(root)) return [];
@@ -653,7 +687,13 @@ class StorageService {
       .map((record) => {
         const billSessionId = record.metadata?.billSessionId || record.billSessionId || path.basename(record.paths?.directory || '');
         const parse = billSessionId ? this.readParseResult(billSessionId) : null;
-        return { ...record, billSessionId, parseResult: parse?.status === OPERATION_STATUS.SUCCESS ? { status: parse.result.status, pageCount: parse.result.pageCount, candidateCount: parse.result.candidateCount, runId: parse.result.runId, parserVersion: parse.result.parserVersion } : null };
+        const resolution = billSessionId ? this.readResolutionResult(billSessionId) : null;
+        return {
+          ...record,
+          billSessionId,
+          parseResult: parse?.status === OPERATION_STATUS.SUCCESS ? { status: parse.result.status, pageCount: parse.result.pageCount, candidateCount: parse.result.candidateCount, runId: parse.result.runId, parserVersion: parse.result.parserVersion } : null,
+          resolutionResult: resolution?.status === OPERATION_STATUS.SUCCESS ? { status: resolution.result.status, resultCount: resolution.result.resultCount, runId: resolution.result.runId, ruleSetVersion: resolution.result.ruleSetVersion, registryVersion: resolution.result.registryVersion } : null
+        };
       })
       .sort((a, b) => String(b.metadata?.importedAt || '').localeCompare(String(a.metadata?.importedAt || '')));
   }

@@ -1,96 +1,104 @@
 # Project Memory
 
-Read this file first for current implementation state. Source audit evidence is in `docs/SOURCE_AUDIT.md`; Phase implementation notes are in `docs/PHASE_01_IMPLEMENTATION.md`, `docs/PHASE_02_IMPLEMENTATION.md`, and `docs/PHASE_03_IMPLEMENTATION.md`.
+Read this file first for current implementation state. Source audit evidence is in `docs/SOURCE_AUDIT.md` and `docs/CGHS_REGISTRY_AUDIT.md`. Phase implementation notes are in `docs/PHASE_01_IMPLEMENTATION.md`, `docs/PHASE_02_IMPLEMENTATION.md`, `docs/PHASE_03_IMPLEMENTATION.md`, and `docs/PHASE_04_IMPLEMENTATION.md`.
 
 ## Current Project Status
 
 - **Current branch:** `arena/01a0dfad-billing-suit`
-- **Phase 2 baseline:** `849c01e58a54108dfbc3e60d62f62ad5af43cb85` / `phase-02-external-storage`
-- **Phase 3 commit target:** `phase-03: implement source PDF ingestion and parser regression coverage`
+- **Phase 3 baseline:** `04aac2a373ef3cf12062a465d9fcbfdedf6bc8ff` / `phase-03-source-pdf-ingestion`
+- **Phase 4 commit target:** `phase-04: add authoritative CGHS registry and deterministic resolution`
 - **Product version:** `5.0.0-rc.2`
-- **Current milestone:** Phase 3 Source Bill PDF Ingestion, Evidence Extraction & Historical Parser Regression implemented in the working tree.
-- **Overall status:** Source PDF import through external Storage, immutable artifact parsing, page extraction, conservative normalization, section detection, evidence candidate extraction, parse-result persistence, audit/failure records, and Source Bills UI candidate presentation are implemented. Electron runtime launch remains environment-blocked because install scripts were skipped and the Electron binary is unavailable.
+- **Current milestone:** Phase 4 Authoritative CGHS Registry & Deterministic Rule Resolution implemented in the working tree.
+- **Overall status:** Source PDF ingestion and parser evidence from Phase 3 now feed a deterministic Phase 4 registry/rule resolver. Resolution output is persisted and previewed in UI. Electron runtime launch remains environment-blocked because dependencies were installed with scripts skipped and the Electron binary is unavailable.
 
-## Phase 3 implementation summary
-
-Phase 3 adds parser evidence extraction without changing CGHS business logic or portal behavior.
+## Phase 4 implementation summary
 
 Implemented:
 
-- `src/services/bill-ingestion/source-parser.js` with parser version `3.0.0`.
-- PDF parse flow from stored `Storage/Source_Bills/<billSessionId>/source.pdf`.
-- Structured page model with raw and normalized text.
-- Conservative normalization that preserves parentheses and code characters.
-- Source section detection with `UNKNOWN_SECTION` fallback.
-- Evidence candidates for parenthesized `Description (CODE)` layouts.
-- Source-derived quantity extraction only; no CGHS-derived formula logic.
-- Candidate provenance with page, section, source text, and line numbers.
-- Persistent `parse-result.json` under each source bill directory.
-- Parser audit events and sanitized failure artifacts.
-- UI parser status, candidate count, warnings, candidate table, and evidence display.
-- Synthetic golden regression fixtures in `tests/fixtures/parser/`.
-- Phase 3 tests in `tests/unit/phase3-source-parser.test.js`.
+- `src/services/cghs/registry.js` with registry schema, source hierarchy, source hashing, JSON/CSV import, validation, effective-date lookup, active registry persistence, and diagnostics summary.
+- `src/services/cghs/rule-resolution.js` with `RULE_SET_VERSION = '4.0.0'`, explicit rule objects, deterministic resolution, conflict detection, raw alias protection, and Phase 3 parse-result integration.
+- `Storage/CGHS/registries`, `Storage/CGHS/rules`, `Storage/CGHS/validation`, and `Storage/CGHS/active-registry.json` as runtime external Storage paths.
+- `Storage/Source_Bills/<billSessionId>/resolution-result.json` persistence.
+- Desktop IPC/preload APIs for registry status and resolution result preview.
+- UI registry status and resolution preview.
+- 47 Phase 4 registry/resolution tests and golden fixtures under `tests/fixtures/registry`, `tests/fixtures/rules`, and `tests/fixtures/resolution`.
 
-## Historical parser regression status
+## Registry authority status
 
-Phase 0 found that `Description (CODE)` was not proven fixed. Phase 3 now covers:
+No approved official CGHS master/rate source exists in this repository.
 
-- same-line `Blood Transfusion Charge (C008)`;
-- wrapped `Blood Transfusion Charge` newline `(C008)`;
-- `Qty` on same or following line;
-- multiple candidates on a page;
-- negative parenthesized values.
+The bundled HFOS snapshot at `src/services/cghs/data/hfos-reference-rates.json` is machine-readable and can be installed into Storage as a partial active registry, but it remains:
 
-The parser preserves `C008` as `C008`; it does not map to `CC008` or perform alias/business-rule normalization.
+```text
+authorityStatus = UNVERIFIED
+registry status = PARTIAL
+```
 
-`REAL_PDF_REGRESSION`: `NOT AVAILABLE — synthetic fixture used`. No approved real hospital-bill PDF fixture exists in this checkout.
+Exact matches from that snapshot are traceable but review-required. They are not production CGHS authority.
+
+## Rule-set identity
+
+- Rule set version: `4.0.0`
+- Total default rules: 20
+- Validated rules: 16
+- Review rules: 4
+
+Locked rules implemented explicitly:
+
+- `CGHS_C_004_NIV_MACHINE_PER_DAY`
+- `CGHS_C_008_BLOOD_TRANSFUSION`
+- `CGHS_C_010_ENDOTRACHEAL_INTUBATION`
+- `CGHS_C_011_CENTRAL_LINE`
+- `CGHS_C_012_NEBULIZER_THERAPY`
+- `CGHS_C_014_RYLES_TUBE_INSERTION`
+- `C002_OXYGEN_HALF_DAY`
+- `C002_OXYGEN_FULL_DAY`
+- `CC001_ICU_COUNT_DERIVED`
+- `WC001_WARD_COUNT_DERIVED`
+- `CN002_ICU_WARD_FORMULA`
+- category composition rules for `LBxxx`, `RIxxx`, `CIxxx`, `GPxxx`, and `PTxxx`.
+
+Review-only/protection rules:
+
+- `C002_PACKED_CELLS_REVIEW`
+- `C003_VENTILATOR_REVIEW`
+- `C003_FRESH_FROZEN_PLASMA_REVIEW`
+- `RAW_ALIAS_PROTECTION`
 
 ## Safety constraints to preserve
 
-- Parser output is evidence only, not executable actions.
-- Do not map `C008 -> CC008` or apply any CGHS alias/rule semantics in the parser.
-- Do not calculate C002 oxygen, CN002, ICU, ward, or other domain-derived quantities in the parser.
-- Do not invoke Selenium, CDP, portal automation, final PDF generation, automatic discharge, external APIs, or credential entry/storage from source parsing.
-- Do not log full PDF text, patient-sensitive content, credentials, cookies, tokens, or browser session payloads.
-- Renderer still must not receive arbitrary filesystem, shell, Python, Node, JavaScript eval, or process execution capability.
+- Parser output is evidence only, not business validation.
+- `ResolutionResult` rows are not executable portal actions.
+- Do not map `C008 -> CC008`, `C002 -> CC002`, `C003 -> CC003`, or any raw alias unless an explicit validated rule matches.
+- Do not invent rates, official registry data, source dates, quantities, or registry authority.
+- Do not let fuzzy/description matches become `VALIDATED_MAPPING`.
+- Do not call Selenium, CDP, Python portal executor, portal bridge, external APIs, final bill PDF generation, automatic discharge, or credential handling from Phase 4.
+- Do not use `eval()`, `new Function()`, shell execution, arbitrary rule expressions, or dynamic code from registry files.
+- Missing/ambiguous evidence means `REVIEW_REQUIRED`, not zero or guessed output.
+- Patient Payable remains separate from main CGHS resolution.
 
-## Current architecture snapshot
+## Phase 3 parser regression status
 
-```text
-Renderer UI
-  -> window.cghsSuite controlled API
-Electron main process
-  -> StorageService source import
-  -> parseStoredSourceBill / source-parser
-  -> Storage/Source_Bills/<billSessionId>/parse-result.json
-  -> audit/failure records
-Existing business/portal/final services remain separate
-```
+Phase 3 parser version remains `3.0.0`.
+
+The Phase 4 resolver consumes actual Phase 3 parser candidates. Tests verify `Blood Transfusion Charge (C008)` preserves parser `codeRaw = C008` and resolves to `CC008` only when the validated rule context matches. Insufficient context remains `REVIEW_REQUIRED`.
+
+`REAL_PDF_REGRESSION`: `NOT AVAILABLE — synthetic fixtures used`. No approved real hospital-bill PDF fixture exists in this checkout.
 
 ## Validation log
 
-Validation commands run during Phase 3 implementation:
+Validation commands run during Phase 4 implementation:
 
-- `node --check src/services/bill-ingestion/source-parser.js src/core/storage.js src/desktop/main.js src/desktop/ipc-contract.js src/desktop/preload.js src/ui/renderer.js tests/unit/phase3-source-parser.test.js` — PASS.
+- `node --check src/services/cghs/registry.js src/services/cghs/rule-resolution.js src/services/cghs/index.js src/core/storage.js src/desktop/main.js src/desktop/ipc-contract.js src/desktop/preload.js src/ui/renderer.js tests/unit/phase4-registry-resolution.test.js` — PASS.
 - `node --test tests/unit/phase3-source-parser.test.js` — PASS, 31/31 tests.
-- `npm test` — PASS, 344/344 tests.
+- `node --test tests/unit/phase4-registry-resolution.test.js` — PASS, 47/47 tests.
+- `npm test` — PASS, 391/391 tests.
 - `python3 -m unittest discover -s tests/python -p 'test_*.py'` — PASS, 32/32 tests.
 - `npm run test:desktop` — FAIL/BLOCKED before Electron launch: `Electron failed to install correctly` after dependency install with scripts skipped.
 
 Known environment notes:
 
-- Electron runtime smoke is not a product PASS in this environment.
+- Electron runtime smoke is not a product PASS in this environment unless a real Electron launch succeeds.
 - Live CGHS portal validation is not verified.
+- Authoritative official CGHS master/rate validation is not available.
 - Real PDF regression is not available; only synthetic non-PHI fixtures were used.
-- Windows EXE, clean-machine, and packaged artifact validation are not Phase 3 claims.
-
-## Important paths
-
-- `src/services/bill-ingestion/source-parser.js` — Phase 3 parser pipeline.
-- `src/core/storage.js` — parse-result persistence helpers.
-- `src/desktop/main.js` — Source Bills import/parse integration.
-- `src/desktop/ipc-contract.js`, `src/desktop/preload.js` — controlled parse-result access.
-- `src/ui/index.html`, `src/ui/renderer.js` — Source Bills candidate/evidence UI.
-- `tests/unit/phase3-source-parser.test.js` — Phase 3 parser regression coverage.
-- `tests/fixtures/parser/*.expected.json` — synthetic golden parser expectations.
-- `docs/PARSER_PIPELINE.md` and `docs/PARSER_REGRESSION.md` — parser architecture and regression documentation.

@@ -1,80 +1,101 @@
-# Design — Phase 3 Source Parser Workspace
+# Design — Phase 4 Registry and Resolution UI
 
 ## Design goal
 
-The Phase 3 UI must show real source PDF ingestion and parser evidence without implying downstream CGHS business validation or executable portal actions. Operators should understand where a candidate came from and whether parsing succeeded, produced warnings, produced no candidates, or failed safely.
+Phase 4 UI must show real registry status and deterministic rule-resolution preview without implying downstream portal execution. Operators should be able to see what was found, what was resolved, what requires review, and why.
+
+## Registry status
+
+Settings and the status strip display:
+
+- Registry status: `ACTIVE`, `PARTIAL`, `NOT CONFIGURED`, or `INVALID`;
+- version;
+- source;
+- short hash;
+- total rule count;
+- validated rule count;
+- review rule count.
+
+No counts are invented. Values come from `registry.getStatus()`.
+
+## Resolution preview
+
+The Enhancement workspace is now a resolution preview, not an executable EnhancementPlan table.
+
+Columns:
+
+- Page
+- Section
+- Description
+- Raw Code
+- Resolved Code
+- Quantity
+- Status
+- Rule
+- Evidence
+
+Supported statuses:
+
+- `DIRECT_REGISTRY_MATCH`
+- `VALIDATED_MAPPING`
+- `REVIEW_REQUIRED`
+- `UNRESOLVED_MAPPING`
+- `RULE_CONFLICT`
+- `REJECTED`
+- `NO_MATCH`
+
+## Review-required explanation
+
+Review-required rows should answer:
+
+1. What was found?
+2. Why was it not auto-resolved?
+3. What evidence is missing?
+4. Which rule or conflict applies?
+
+Example display content may be:
+
+```text
+Found: C003
+Context: Ventilator
+Result: REVIEW_REQUIRED
+Reason: No validated C003 ventilator to final-code mapping exists in the active registry/rule set.
+```
+
+An unresolved result is acceptable. Inventing a code is not.
 
 ## Source Bills workspace
 
-The Source Bills section now presents:
+Source Bills continues to show parser results:
 
 - selected source file metadata;
 - stored source record list;
 - parser status;
 - page count;
 - candidate count;
-- warnings;
-- candidate table;
-- candidate evidence viewer.
+- parser warnings;
+- parser candidate table;
+- candidate evidence viewer;
+- resolution summary for persisted source records.
 
-Candidate table columns:
-
-- Page
-- Section
-- Description
-- Code
-- Quantity
-- Status
-
-The table intentionally does not include “Executable” because Phase 3 candidates are parser evidence only.
-
-## Honest states
-
-Use these meanings consistently:
-
-| State | UI meaning |
-|---|---|
-| No source | Upload a source bill to begin. |
-| Imported / reading | Source bill stored; parser is reading/extracting. |
-| Completed | Source PDF parsed and candidates were detected. |
-| Completed with warnings | Source PDF parsed; one or more candidates/lines need attention. |
-| Parser completed no candidates | PDF parsed successfully, but no candidate enhancement entries were detected. |
-| Failed | Source PDF could not be parsed. |
-
-Do not show fake success or portal readiness.
-
-## Candidate evidence
-
-When a candidate is selected, show the raw evidence object. It must include page number, source section, source text, and line numbers when available. `textRange` remains `null` unless real offsets are produced.
+Parser candidates remain evidence. They are not automatically business-validated.
 
 ## Privacy
 
-Source PDFs may contain patient-sensitive information. The UI should show only necessary parser evidence for the selected candidate and should not dump complete PDF text into generic diagnostics or audit views.
+Source PDFs may contain patient-sensitive information. The UI should show necessary candidate/resolution evidence only and must not dump complete PDF text into generic diagnostics or audit views.
 
-## Navigation sections
+## Status colors
 
-The shell keeps:
-
-1. Dashboard
-2. Source Bills
-3. Enhancement
-4. Final Bill
-5. Audit / History
-6. Settings
-7. Diagnostics
-
-Phase 3 changes are concentrated in Source Bills. Enhancement, portal, and final-bill areas must not imply new business-rule or portal capabilities.
-
-## Visual status language
-
-- `READY`, `COMPLETED`, and successful checks use success styling.
-- `PARSER_COMPLETED_NO_CANDIDATES`, `AMBIGUOUS`, `NOT VERIFIED`, and review states use warning styling.
-- `FAILED`, `READ_ONLY`, `ACCESS_ERROR`, `CORRUPT`, and parser failures use error styling.
+- Success/validated: `ACTIVE`, `READY`, `COMPLETED`, `VALIDATED_MAPPING`, `DIRECT_REGISTRY_MATCH`.
+- Warning/review: `PARTIAL`, `NOT CONFIGURED`, `REVIEW_REQUIRED`, `UNRESOLVED_MAPPING`, `NO_MATCH`, `NOT VERIFIED`.
+- Error/conflict: `INVALID`, `FAILED`, `RULE_CONFLICT`, `REJECTED`, `CORRUPT`, `ACCESS_ERROR`.
 
 Every status is written as text; color is secondary.
 
 ## Interaction boundaries
 
 - All privileged actions go through `window.cghsSuite`.
-- Parse-result access is controlled through `sourceBill.getParseResult`.
+- Registry status access is controlled through `registry.getStatus`.
+- Resolution access is controlled through `resolution.getResult` and `resolution.getStatus`.
 - There is no generic command execution, shell execution, Python execution, JavaScript eval, arbitrary filesystem browsing, unrestricted PDF access, or credential handling.
+- Resolution preview rows must not expose a “Run”, “Execute”, or “Click portal” action in Phase 4.

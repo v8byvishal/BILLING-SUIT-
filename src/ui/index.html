@@ -26,13 +26,13 @@
         <button class="nav-item" type="button" data-route="settings">Settings</button>
         <button class="nav-item" type="button" data-route="diagnostics">Diagnostics</button>
       </nav>
-      <div class="sidebar-note">Portal readiness is not verified in Phase 3.</div>
+      <div class="sidebar-note">Portal readiness is not verified in Phase 4.</div>
     </aside>
 
     <main class="main">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Desktop foundation</p>
+          <p class="eyebrow">Registry & evidence resolution</p>
           <h1 id="viewTitle">Dashboard</h1>
         </div>
         <div class="header-actions">
@@ -45,6 +45,7 @@
         <div><span>Application</span><strong id="statusApp">STARTING</strong></div>
         <div><span>Storage</span><strong id="statusStorage">NOT_INITIALIZED</strong></div>
         <div><span>Current Bill</span><strong id="statusBill">NONE</strong></div>
+        <div><span>Registry</span><strong id="statusRegistry">NOT CONFIGURED</strong></div>
         <div><span>Enhancement</span><strong id="statusEnhancement">NOT STARTED</strong></div>
         <div><span>Portal</span><strong id="statusPortal">NOT VERIFIED</strong></div>
         <div><span>Final Bill</span><strong id="statusFinalBill">NOT STARTED</strong></div>
@@ -88,7 +89,7 @@
             <button id="clearSourceBill" type="button">Clear current bill</button>
             <button id="openSourceFolder" type="button">Open Source_Bills</button>
           </div>
-          <div class="notice">Phase 3 stores the selected PDF, parses the immutable copy, and shows evidence candidates. Business-rule validation is not performed here.</div>
+          <div class="notice">Phase 4 keeps parser evidence separate from business validation. Source candidates are resolved only through the active registry and explicit deterministic rules.</div>
           <dl class="details">
             <div><dt>billSessionId</dt><dd id="sourceSession">NONE</dd></div>
             <div><dt>Filename</dt><dd id="sourceFile">No source bill loaded.</dd></div>
@@ -114,7 +115,7 @@
           <h3>Persisted Source Bills</h3>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Imported</th><th>billSessionId</th><th>Original file</th><th>Status</th><th>Parser</th><th>SHA-256</th></tr></thead>
+              <thead><tr><th>Imported</th><th>billSessionId</th><th>Original file</th><th>Status</th><th>Parser</th><th>Resolution</th><th>SHA-256</th></tr></thead>
               <tbody id="sourceRecordRows"></tbody>
             </table>
           </div>
@@ -123,23 +124,23 @@
 
       <section class="view" id="view-enhancement" data-title="Enhancement">
         <article class="panel">
-          <div class="panel-head"><div><h2>Enhancement workspace</h2><p>Review deterministic plan state without changing CGHS rules.</p></div><span id="enhancementState">No plan</span></div>
+          <div class="panel-head"><div><h2>Resolution preview</h2><p>Review deterministic registry/rule resolution. These rows are not portal-executable actions.</p></div><span id="enhancementState">No resolution</span></div>
           <div class="subgrid">
             <section><h3>Current Bill</h3><p id="enhancementBill" class="empty-text">No source bill is active.</p></section>
             <section><h3>Execution Status</h3><p id="executionStatus" class="empty-text">Portal readiness has not been verified.</p></section>
           </div>
-          <h3>EnhancementPlan</h3>
-          <p id="noPlanMessage" class="empty-text">No EnhancementPlan available.</p>
+          <h3>ResolutionResult</h3>
+          <p id="noPlanMessage" class="empty-text">No resolution preview available.</p>
           <div class="table-wrap" id="planTableWrap" hidden>
             <table>
-              <thead><tr><th>Code</th><th>Quantity</th><th>Status</th><th>Source / Rule</th><th>Evidence</th></tr></thead>
+              <thead><tr><th>Page</th><th>Section</th><th>Description</th><th>Raw Code</th><th>Resolved Code</th><th>Quantity</th><th>Status</th><th>Rule</th><th>Evidence</th></tr></thead>
               <tbody id="planRows"></tbody>
             </table>
           </div>
           <h3>Review Required</h3>
-          <p id="reviewSummary" class="empty-text">No review queue is loaded in this foundation screen.</p>
+          <p id="reviewSummary" class="empty-text">Resolution review queue has not been loaded.</p>
           <h3>Diagnostics</h3>
-          <pre id="enhancementDiagnostics">No enhancement diagnostics available.</pre>
+          <pre id="enhancementDiagnostics">No resolution diagnostics available.</pre>
         </article>
       </section>
 
@@ -149,7 +150,7 @@
           <div class="subgrid">
             <section><h3>Final Bill Source</h3><p class="empty-text">No final bill PDF loaded.</p></section>
             <section><h3>Extracted Sections</h3><p class="empty-text">No supported final-bill sections extracted.</p></section>
-            <section><h3>Editable Metadata</h3><p class="empty-text">Editable final-bill formatting is not enabled in Phase 3.</p></section>
+            <section><h3>Editable Metadata</h3><p class="empty-text">Editable final-bill formatting is not enabled in Phase 4.</p></section>
             <section><h3>Composition Preview</h3><p class="empty-text">Final bill composition engine is not yet enabled.</p></section>
             <section><h3>Validation</h3><p class="empty-text">No final-bill validation has run.</p></section>
             <section><h3>Output Status</h3><p class="empty-text">No final PDF has been generated.</p></section>
@@ -185,6 +186,15 @@
             <div class="actions"><button class="primary" type="submit">Save settings</button><button id="openConfigFolder" type="button">Open Config</button></div>
           </form>
           <p class="notice">Changing Storage location is persisted for controlled follow-up handling. Active runtime Storage is not silently switched mid-session.</p>
+          <h3>Registry</h3>
+          <dl class="details">
+            <div><dt>Status</dt><dd id="registryStatus">NOT CONFIGURED</dd></div>
+            <div><dt>Version</dt><dd id="registryVersion">NONE</dd></div>
+            <div><dt>Source</dt><dd id="registrySource">NONE</dd></div>
+            <div><dt>Hash</dt><dd id="registryHash">NONE</dd></div>
+            <div><dt>Rules</dt><dd id="registryRuleCounts">0</dd></div>
+          </dl>
+          <div class="actions"><button id="openCghsFolder" type="button">Open CGHS registry folder</button></div>
         </article>
       </section>
 

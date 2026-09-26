@@ -28,6 +28,8 @@ const { classifyDiscrepancy, saveValidation } = require('../services/validation/
 const { ProductionValidationRunService } = require('../services/validation/production-validation-run');
 const { createDiagnosticsReport, ensureDiagnosticsFolder, writeDiagnosticsReport } = require('../services/diagnostics/diagnostics-service');
 const { parseStoredSourceBill, PARSER_STATUSES } = require('../services/bill-ingestion/source-parser');
+const { ActiveRegistryStore } = require('../services/cghs/registry');
+const { getDefaultRuleSet, resolveParseResult } = require('../services/cghs/rule-resolution');
 const { OPERATIONS, registerPhase1Ipc } = require('./phase1-ipc');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
@@ -52,6 +54,10 @@ let caseWorkflow = null;
 let currentValidationReport = null;
 let productionValidationService = null;
 let currentProductionValidationRun = null;
+let registryStore = null;
+let activeRegistryState = null;
+let activeRuleSet = null;
+let currentResolutionRun = null;
 let settingsStore = null;
 let phase1Settings = null;
 const state = createAppState();
@@ -72,6 +78,42 @@ function rebuildRateRepository() {
   const snapshot = customCodeRegistry.snapshot();
   rateRepository = createBundledRateRepository(customCodeRegistry.activeRateEntries(), { customRegistrySnapshot: snapshot });
   if (caseWorkflow) caseWorkflow.rateRepository = rateRepository;
+}
+
+function refreshActiveRegistryState() {
+  if (!registryStore) return null;
+  activeRegistryState = registryStore.loadActiveRegistry();
+  return activeRegistryState;
+}
+
+function activeRegistry() {
+  return (activeRegistryState?.status === 'SUCCESS' ? activeRegistryState.registry : null);
+}
+
+function registryStatusSummary() {
+  return registryStore ? registryStore.statusSummary(activeRuleSet) : null;
+}
+
+function persistResolutionForParseResult(parseResult) {
+  if (!parseResult || !storageService) return null;
+  const resolution = resolveParseResult(parseResult, {
+    registry: activeRegistry(),
+    ruleSet: activeRuleSet,
+    billSessionId: parseResult.billSessionId,
+    parserRunId: parseResult.runId,
+    parserVersion: parseResult.parserVersion
+  });
+  storageService.writeResolutionResult(parseResult.billSessionId, resolution);
+  storageService.appendAudit({
+    runId: resolution.runId,
+    billSessionId: parseResult.billSessionId,
+    operation: 'CGHS_RULE_RESOLUTION_COMPLETED',
+    stage: 'CGHS_RESOLUTION',
+    status: resolution.status,
+    sourceRef: { registryVersion: resolution.registryVersion, registrySourceHash: resolution.registrySourceHash, ruleSetVersion: resolution.ruleSetVersion, counts: resolution.counts }
+  });
+  currentResolutionRun = resolution;
+  return resolution;
 }
 
 function refreshCurrentPlan() {
@@ -103,6 +145,7 @@ function clearActiveBillWorkspace() {
   currentCompletedBill = null;
   currentValidationReport = null;
   currentProductionValidationRun = null;
+  currentResolutionRun = null;
   currentCaseId = null;
   state.set('IDLE');
   phase1State.resetCurrentBill();
@@ -146,6 +189,12 @@ async function selectAndParseSourceBill() {
     const importResult = storageService.importSourceBill(filePath, { originalFileName: path.basename(filePath) });
     if (importResult.status === 'DUPLICATE_SOURCE_BILL') {
       const existingParse = storageService.readParseResult(importResult.billSessionId);
+      let existingResolution = storageService.readResolutionResult(importResult.billSessionId);
+      if (existingParse.status === 'SUCCESS' && existingResolution.status !== 'SUCCESS') {
+        persistResolutionForParseResult(existingParse.result);
+        existingResolution = storageService.readResolutionResult(importResult.billSessionId);
+      }
+      currentResolutionRun = existingResolution.status === 'SUCCESS' ? existingResolution.result : null;
       const source = { file_path: importResult.paths?.sourceFile || null, file_name: importResult.metadata?.originalFileName || path.basename(filePath), sha256: importResult.metadata?.sha256 || null, source_bill_id: importResult.metadata?.sourceBillId || importResult.billSessionId };
       const billSessionId = phase1State.startBillSession({
         billSessionId: importResult.billSessionId,
@@ -156,13 +205,16 @@ async function selectAndParseSourceBill() {
           persistedSource: importResult.metadata,
           parseStatus: existingParse.status === 'SUCCESS' ? existingParse.result.status : 'NOT_STARTED',
           pageCount: existingParse.result?.pageCount || 0,
-          candidateCount: existingParse.result?.candidateCount || 0
+          candidateCount: existingParse.result?.candidateCount || 0,
+          resolutionStatus: currentResolutionRun?.status || 'NOT_STARTED',
+          resolutionCount: currentResolutionRun?.resultCount || 0,
+          ruleSetVersion: currentResolutionRun?.ruleSetVersion || activeRuleSet?.ruleSetVersion || null
         }
       });
-      currentBill = existingParse.status === 'SUCCESS' ? { source, parserResult: existingParse.result } : { source, parserResult: null };
+      currentBill = existingParse.status === 'SUCCESS' ? { source, parserResult: existingParse.result, resolutionResult: currentResolutionRun } : { source, parserResult: null, resolutionResult: null };
       state.set('BILL_LOADED');
       phase1State.appendHistory({ billSessionId, operation: 'SOURCE_BILL_DUPLICATE', status: 'DUPLICATE_SOURCE_BILL', source_reference: importResult.metadata });
-      return { canceled: false, duplicate: true, duplicateCode: 'DUPLICATE_SOURCE_BILL', billSessionId, source: importResult.metadata, parseResult: existingParse.result || null, appState: phase1State.snapshot() };
+      return { canceled: false, duplicate: true, duplicateCode: 'DUPLICATE_SOURCE_BILL', billSessionId, source: importResult.metadata, parseResult: existingParse.result || null, resolutionResult: currentResolutionRun, appState: phase1State.snapshot() };
     }
     if (importResult.status !== 'IMPORTED') throw new Error(importResult.message || importResult.code || importResult.status);
 
@@ -179,7 +231,8 @@ async function selectAndParseSourceBill() {
       metadata: { fileName: source.file_name, sha256: source.sha256, persistedSource: importResult.metadata, parseStatus: PARSER_STATUSES.READING, pageCount: 0, candidateCount: 0 }
     });
     const parseResult = await parseStoredSourceBill(storageService, billSessionId);
-    currentBill = { source, parserResult: parseResult };
+    const resolutionResult = parseResult.status === PARSER_STATUSES.FAILED ? null : persistResolutionForParseResult(parseResult);
+    currentBill = { source, parserResult: parseResult, resolutionResult };
     currentEnhancementPlan = null;
     state.set(parseResult.status === PARSER_STATUSES.FAILED ? 'ERROR' : 'BILL_LOADED');
     phase1State.setCurrentBillMetadata({
@@ -192,7 +245,11 @@ async function selectAndParseSourceBill() {
       candidateCount: parseResult.candidateCount,
       parserVersion: parseResult.parserVersion,
       runId: parseResult.runId,
-      warnings: parseResult.warnings || []
+      warnings: parseResult.warnings || [],
+      resolutionStatus: resolutionResult?.status || 'NOT_STARTED',
+      resolutionCount: resolutionResult?.resultCount || 0,
+      ruleSetVersion: resolutionResult?.ruleSetVersion || activeRuleSet?.ruleSetVersion || null,
+      registryVersion: resolutionResult?.registryVersion || activeRegistry()?.registryVersion || null
     });
     phase1State.resetEnhancement({ preserveSession: true });
     if (parseResult.status === PARSER_STATUSES.FAILED) {
@@ -205,7 +262,7 @@ async function selectAndParseSourceBill() {
       phase1State.appendHistory({ billSessionId, operation: 'PDF_PARSE_COMPLETED', status: parseResult.status });
     }
     logger.info('Source bill imported and parsed for evidence candidates', { billSessionId, pages: parseResult.pageCount, candidates: parseResult.candidateCount, status: parseResult.status });
-    return { canceled: false, billSessionId, source: importResult.metadata, parseResult, appState: phase1State.snapshot() };
+    return { canceled: false, billSessionId, source: importResult.metadata, parseResult, resolutionResult, appState: phase1State.snapshot() };
   } catch (error) {
     state.set('ERROR');
     phase1State.setAppStatus(APP_STATUS.ERROR, error.message);
@@ -241,6 +298,8 @@ function createPhase1Handlers() {
         applicationState: phase1State.snapshot(),
         includeUsage: true
       });
+      report.registry = registryStatusSummary();
+      report.resolution = currentResolutionRun ? { status: currentResolutionRun.status, counts: currentResolutionRun.counts, ruleSetVersion: currentResolutionRun.ruleSetVersion } : null;
       phase1State.setDiagnostics({ records: [report] });
       return report;
     },
@@ -262,6 +321,17 @@ function createPhase1Handlers() {
       if (!billSessionId) return null;
       const result = storageService.readParseResult(billSessionId);
       if (result.status === 'SUCCESS') return result.result;
+      return { status: result.status, error: result.error || null, billSessionId };
+    },
+    [OPERATIONS.REGISTRY_GET_STATUS]: () => registryStatusSummary(),
+    [OPERATIONS.RESOLUTION_GET_STATUS]: () => currentResolutionRun ? { status: currentResolutionRun.status, resultCount: currentResolutionRun.resultCount, counts: currentResolutionRun.counts, ruleSetVersion: currentResolutionRun.ruleSetVersion, registryVersion: currentResolutionRun.registryVersion } : { status: 'NOT_STARTED', resultCount: 0, counts: {}, ruleSetVersion: activeRuleSet?.ruleSetVersion || null, registryVersion: activeRegistry()?.registryVersion || null },
+    [OPERATIONS.RESOLUTION_GET_RESULT]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return null;
+      const result = storageService.readResolutionResult(billSessionId);
+      if (result.status === 'SUCCESS') { currentResolutionRun = result.result; return result.result; }
+      const parse = storageService.readParseResult(billSessionId);
+      if (parse.status === 'SUCCESS') return persistResolutionForParseResult(parse.result);
       return { status: result.status, error: result.error || null, billSessionId };
     },
     [OPERATIONS.BILL_GET_CURRENT]: () => phase1State.snapshot().currentBill,
@@ -425,6 +495,13 @@ async function bootstrap() {
     storageService = new StorageService({ root: storagePath, appDataPath: app.getPath('appData'), documentsPath: app.getPath('documents'), appDir: APP_DIR });
     storageInfo = storageService.initialize({ legacySettingsPath: path.join(app.getPath('userData'), 'phase1-settings.json') });
     if (storageInfo.status !== 'READY' && storageInfo.status !== 'CORRUPT') throw new Error(`Storage is not ready: ${storageInfo.status}${storageInfo.error ? ` - ${storageInfo.error}` : ''}`);
+    activeRuleSet = getDefaultRuleSet();
+    registryStore = new ActiveRegistryStore(storageService);
+    try {
+      activeRegistryState = registryStore.ensureDefaultUnverifiedRegistry({ sourceFile: path.join(APP_DIR, 'src', 'services', 'cghs', 'data', 'hfos-reference-rates.json') });
+    } catch (error) {
+      activeRegistryState = { status: 'INVALID', registry: null, validation: error.validation || null, error: error.message };
+    }
     settingsStore = new SettingsStore(storageService.getSettingsPath());
     phase1Settings = settingsStore.load();
     if (!phase1Settings.corrupt && !phase1Settings.storagePath) phase1Settings = settingsStore.save({ storagePath, loggingLevel: config.logging.level, diagnosticsEnabled: true });
@@ -447,10 +524,13 @@ async function bootstrap() {
       version: app.getVersion(),
       rateRecords: rateRepository.provenance.record_count,
       rateAuthority: rateRepository.provenance.authority_status,
+      registryVersion: activeRegistry()?.registryVersion || null,
+      registryAuthority: activeRegistry()?.authorityStatus || null,
+      ruleSetVersion: activeRuleSet.ruleSetVersion,
       recoveredCases: recoveredCases.length,
       storageStatus: storageInfo.status
     });
-    storageService.appendAudit({ operation: 'APPLICATION_STARTUP', stage: 'DESKTOP', status: 'SUCCESS', sourceRef: { recoveredCases, storageStatus: storageInfo.status } });
+    storageService.appendAudit({ operation: 'APPLICATION_STARTUP', stage: 'DESKTOP', status: 'SUCCESS', sourceRef: { recoveredCases, storageStatus: storageInfo.status, registryVersion: activeRegistry()?.registryVersion || null, ruleSetVersion: activeRuleSet.ruleSetVersion } });
     registerPhase1Ipc(ipcMain, createPhase1Handlers());
     registerIpc();
     createWindow();

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "registryVersion": "phase4-test-registry-v1",
+  "source": { "type": "TEST_ONLY_JSON", "file": "phase4-valid-registry.json" },
+  "sourceHash": "phase4-valid-registry-source-hash",
+  "publishedDate": "2026-09-27",
+  "importedAt": "2026-09-27T00:00:00.000Z",
+  "authorityStatus": "TEST_ONLY",
+  "entries": [
+    {
+      "entryId": "REG-LB126",
+      "code": "LB126",
+      "description": "Blood Transfusion Charge Registry Fixture",
+      "category": "TEST",
+      "unit": "COUNT",
+      "rate": null,
+      "sourceReference": { "file": "phase4-valid-registry.json", "page": null, "sheet": null, "row": 1 },
+      "authorityStatus": "TEST_ONLY",
+      "effectiveFrom": null,
+      "effectiveTo": null
+    },
+    {
+      "entryId": "REG-GP009",
+      "code": "GP009",
+      "description": "CGHS-G P009 fixture",
+      "category": "TEST",
+      "unit": "COUNT",
+      "rate": 10,
+      "sourceReference": { "file": "phase4-valid-registry.json", "page": null, "sheet": null, "row": 2 },
+      "authorityStatus": "TEST_ONLY",
+      "effectiveFrom": null,
+      "effectiveTo": null
+    }
+  ]
+}

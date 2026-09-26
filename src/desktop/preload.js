@@ -35,6 +35,13 @@ const api = Object.freeze({
   sourceBill: Object.freeze({
     getParseResult: (billSessionId) => call(OPERATIONS.SOURCE_BILL_GET_PARSE_RESULT, { billSessionId })
   }),
+  registry: Object.freeze({
+    getStatus: () => call(OPERATIONS.REGISTRY_GET_STATUS)
+  }),
+  resolution: Object.freeze({
+    getStatus: () => call(OPERATIONS.RESOLUTION_GET_STATUS),
+    getResult: (billSessionId) => call(OPERATIONS.RESOLUTION_GET_RESULT, { billSessionId })
+  }),
   bill: Object.freeze({
     getCurrent: () => call(OPERATIONS.BILL_GET_CURRENT),
     clearCurrent: () => call(OPERATIONS.BILL_CLEAR_CURRENT),
