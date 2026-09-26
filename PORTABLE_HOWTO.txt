@@ -1,0 +1,12 @@
+BUILD THE PORTABLE VERSION FROM THIS PROJECT
+============================================
+1. Download stock Electron 31.7.7 for Windows x64 (one file, official):
+   https://github.com/electron/electron/releases/download/v31.7.7/electron-v31.7.7-win32-x64.zip
+2. Unzip it into a folder, e.g. CGHS-Portable\
+3. Delete CGHS-Portable\resources\default_app.asar
+4. Copy THIS project folder's contents (main.js, preload.js, package.json,
+   app\, build\, node_modules\sql.js\) into CGHS-Portable\resources\app\
+5. Rename electron.exe -> "CGHS Billing Suite Pro.exe"
+Done - run the exe. Data is stored encrypted in %APPDATA%\cghs-billing-suite-pro.
+(Alternative without any download: install with the Setup from Part1+Part2,
+then copy %LOCALAPPDATA%\Programs\CGHS Billing Suite Pro to a USB drive.)

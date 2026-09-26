@@ -1,0 +1,9 @@
+CGHS Billing Suite Pro - Electron Project (v5.0.0-rc.1)
+Rebuild steps:
+  1. npm install                (installs sql.js, the only runtime dependency)
+  2. npx electron .             (run in development)
+  3. Package: copy this folder into electron-v31.7.7-win32-x64/resources/app,
+     rename electron.exe to "CGHS Billing Suite Pro.exe",
+     then compile the NSIS script (see 06_Documentation/installer.nsi).
+Note: app/index.html is generated from 04_Source_Code/CGHS_Billing_Suite_Pro.html
+by appending <script src="desktop-bridge.js"></script> before </body>.

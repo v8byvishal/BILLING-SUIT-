@@ -1,0 +1,12 @@
+{
+  "name": "cghs-billing-suite-pro",
+  "productName": "CGHS Billing Suite Pro",
+  "version": "5.0.0-rc.1",
+  "description": "Offline hospital billing system with CGHS rate verification, financial integrity engine and AI validation",
+  "main": "main.js",
+  "author": "CGHS Back Office",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "sql.js": "1.13.0"
+  }
+}
