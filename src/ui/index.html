@@ -8,109 +8,172 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">CGHS BILLING SUITE</p>
-        <h1>VNEXT</h1>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">CG</span>
+        <div>
+          <p>CGHS Billing</p>
+          <strong>Enhancement Suite</strong>
+        </div>
       </div>
-      <div class="status"><span class="dot"></span><span id="readyStatus">Starting…</span></div>
-    </header>
+      <nav class="nav-list">
+        <button class="nav-item active" type="button" data-route="dashboard">Dashboard</button>
+        <button class="nav-item" type="button" data-route="sourceBills">Source Bills</button>
+        <button class="nav-item" type="button" data-route="enhancement">Enhancement</button>
+        <button class="nav-item" type="button" data-route="finalBill">Final Bill</button>
+        <button class="nav-item" type="button" data-route="history">Audit / History</button>
+        <button class="nav-item" type="button" data-route="settings">Settings</button>
+        <button class="nav-item" type="button" data-route="diagnostics">Diagnostics</button>
+      </nav>
+      <div class="sidebar-note">Portal readiness is not verified in Phase 1.</div>
+    </aside>
 
-    <section class="welcome" aria-labelledby="welcomeTitle">
-      <div class="copy">
-        <p class="phase">DETERMINISTIC RULES · PHASE 3</p>
-        <h2 id="welcomeTitle">Inspect a local enhancement plan.</h2>
-        <p>Select a hospital bill PDF to parse it once and evaluate local deterministic code/rule results. The bundled rates are an unverified HFOS reference snapshot, not confirmed official authority. Nothing is sent to a portal.</p>
-        <button class="primary-action" id="selectBill" type="button">Select PDF</button>
-      </div>
-      <dl class="readiness">
-        <div><dt>Application</dt><dd id="appState">Checking</dd></div>
-        <div><dt>External Storage</dt><dd id="storageState">Checking</dd></div>
-        <div><dt>Environment</dt><dd id="environment">Checking</dd></div>
-      </dl>
-    </section>
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Desktop foundation</p>
+          <h1 id="viewTitle">Dashboard</h1>
+        </div>
+        <div class="header-actions">
+          <button id="refreshState" type="button">Refresh</button>
+          <button id="openStorageRoot" type="button">Open Storage</button>
+        </div>
+      </header>
 
-    <section class="plan-view" id="caseView" aria-labelledby="caseTitle">
-      <div class="plan-head"><div><h3 id="caseTitle">Operational cases</h3><p>One persistent case controls the current bill and browser context.</p></div><span id="currentCaseStatus">NO ACTIVE CASE</span></div>
-      <div class="final-actions"><button id="scanInitialInbox" type="button">Scan Initial inbox</button><button id="scanFinalInbox" type="button">Scan Final inbox</button><button id="confirmVerification" type="button" hidden>Confirm verification</button><button id="confirmDischarge" type="button" hidden>Confirm manual discharge</button></div>
-      <div class="final-actions" aria-label="Automatic inbox intake"><strong>Automatic inbox intake: <span id="watcherStatus">STOPPED</span></strong><button id="watcherStart" type="button">Start</button><button id="watcherPause" type="button">Pause</button><button id="watcherResume" type="button">Resume</button><button id="watcherStop" type="button">Stop</button><span id="watcherInfo">No scan yet</span></div>
-      <div class="table-wrap"><table><thead><tr><th>Case ID</th><th>Bill No</th><th>Status</th><th>Updated</th><th>Review</th><th>Action</th></tr></thead><tbody id="caseRows"></tbody></table></div>
-    </section>
+      <section class="status-strip" aria-label="Application status">
+        <div><span>Application</span><strong id="statusApp">STARTING</strong></div>
+        <div><span>Storage</span><strong id="statusStorage">NOT_INITIALIZED</strong></div>
+        <div><span>Current Bill</span><strong id="statusBill">NONE</strong></div>
+        <div><span>Enhancement</span><strong id="statusEnhancement">NOT STARTED</strong></div>
+        <div><span>Portal</span><strong id="statusPortal">NOT VERIFIED</strong></div>
+        <div><span>Final Bill</span><strong id="statusFinalBill">NOT STARTED</strong></div>
+      </section>
 
-    <section class="parse-result" id="parseResult" hidden aria-live="polite">
-      <div><span>Status</span><strong id="parseStatus">IDLE</strong></div>
-      <div><span>File</span><strong id="parsedFile">—</strong></div>
-      <div><span>Pages</span><strong id="parsedPages">0</strong></div>
-      <div><span>Primary items</span><strong id="parsedItems">0</strong></div>
-      <div><span>Excluded sections</span><strong id="excludedSections">0</strong></div>
-      <p id="parseMessage"></p>
-    </section>
+      <section id="banner" class="banner" hidden role="status" aria-live="polite"></section>
 
-    <section class="plan-view" id="planView" hidden aria-labelledby="planTitle">
-      <div class="plan-head"><div><h3 id="planTitle">Deterministic enhancement plan</h3><p id="rateSource">Rate source —</p></div><span id="planWarning">Review required</span></div>
-      <div class="table-wrap"><table><thead><tr><th>Code</th><th>Quantity</th><th>Rate</th><th>Amount</th><th>Source / Rule</th><th>Status</th></tr></thead><tbody id="planRows"></tbody></table></div>
-    </section>
+      <section class="view active" id="view-dashboard" data-title="Dashboard">
+        <div class="grid two">
+          <article class="panel">
+            <div class="panel-head"><h2>Operational state</h2><span id="dashboardState">Loading</span></div>
+            <dl class="details">
+              <div><dt>Storage root</dt><dd id="dashboardStoragePath">—</dd></div>
+              <div><dt>Current bill session</dt><dd id="dashboardSession">NONE</dd></div>
+              <div><dt>Current bill</dt><dd id="dashboardBill">No source bill loaded.</dd></div>
+              <div><dt>Enhancement</dt><dd id="dashboardEnhancement">No EnhancementPlan available.</dd></div>
+              <div><dt>Portal</dt><dd>Portal readiness has not been verified.</dd></div>
+              <div><dt>Final bill</dt><dd id="dashboardFinalBill">Final bill workflow has not started.</dd></div>
+            </dl>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><h2>Next safe action</h2></div>
+            <p id="nextAction" class="empty-text">Upload a source bill to begin.</p>
+            <div class="actions">
+              <button class="primary" id="dashboardSelectBill" type="button">Select source PDF</button>
+              <button id="dashboardDiagnostics" type="button">View diagnostics</button>
+            </div>
+          </article>
+        </div>
+      </section>
 
-    <section class="plan-view" id="validationView" hidden aria-labelledby="validationTitle">
-      <div class="plan-head"><div><h3 id="validationTitle">Bill validation</h3><p>Compare the current one-pass bill/plan artifacts with a reviewed, versioned expected baseline.</p></div><span id="validationStatus">NOT RUN</span></div>
-      <div class="final-actions"><button id="runValidation" type="button">Select expected JSON and validate</button><button id="confirmValidationPlan" type="button">Confirm reviewed plan</button><button id="addValidationNote" type="button">Add operator note</button><span id="validationSummary">No validation report loaded.</span></div>
-      <div class="table-wrap"><table><thead><tr><th>Type</th><th>Code</th><th>Expected</th><th>Actual</th><th>Section/Page</th><th>Reason</th><th>Decision</th></tr></thead><tbody id="validationRows"></tbody></table></div>
-      <pre id="validationEvidence" hidden></pre>
-    </section>
+      <section class="view" id="view-sourceBills" data-title="Source Bills">
+        <article class="panel">
+          <div class="panel-head">
+            <div><h2>Source Bills</h2><p>Load a local text-based hospital bill PDF using the existing parser when available.</p></div>
+            <span id="sourceState">Empty</span>
+          </div>
+          <div class="actions">
+            <button class="primary" id="selectSourceBill" type="button">Select source PDF</button>
+            <button id="clearSourceBill" type="button">Clear current bill</button>
+            <button id="openSourceFolder" type="button">Open Source_Bills</button>
+          </div>
+          <div class="notice">Phase 1 provides the workspace and safe session boundary. Parser behavior is not changed in this phase.</div>
+          <dl class="details">
+            <div><dt>billSessionId</dt><dd id="sourceSession">NONE</dd></div>
+            <div><dt>Filename</dt><dd id="sourceFile">No source bill loaded.</dd></div>
+            <div><dt>Pages</dt><dd id="sourcePages">—</dd></div>
+            <div><dt>Bill number</dt><dd id="sourceBillNumber">—</dd></div>
+            <div><dt>Patient / identifiers</dt><dd id="sourceIdentifiers">—</dd></div>
+            <div><dt>Detected sections</dt><dd id="sourceSections">—</dd></div>
+          </dl>
+        </article>
+      </section>
 
-    <section class="plan-view" id="reviewView" hidden aria-labelledby="reviewTitle">
-      <div class="plan-head"><div><h3 id="reviewTitle">Enhancement review</h3><p>Unknown, unresolved, malformed, and advisory records require an explicit decision.</p></div><span id="reviewCount">0 open</span></div>
-      <div class="table-wrap"><table><thead><tr><th>Code / Raw text</th><th>Section / Page</th><th>Qty</th><th>Status</th><th>Reason</th><th>Actions</th></tr></thead><tbody id="reviewRows"></tbody></table></div>
-      <form id="customCodeForm" class="registry-form" hidden>
-        <input id="customCode" required placeholder="Code" aria-label="Custom code">
-        <input id="customDescription" required placeholder="Description" aria-label="Description">
-        <select id="customQuantityBehavior" aria-label="Quantity behavior"><option>MANUAL</option><option>FIXED</option><option>PER_DAY</option></select>
-        <input id="customFixedQuantity" type="number" min="1" step="1" placeholder="Fixed quantity" aria-label="Fixed quantity">
-        <input id="customReason" required placeholder="Reason" aria-label="Reason">
-        <input id="customSource" required placeholder="Source / reference" aria-label="Source or reference">
-        <input id="customOperator" required placeholder="Operator identifier" aria-label="Operator identifier">
-        <input id="customRate" type="number" min="0" step="0.01" placeholder="Rate (optional)" aria-label="Optional rate">
-        <label><input id="customOverride" type="checkbox"> Explicit reference override</label>
-        <button class="primary-action" type="submit">Save custom code</button>
-        <button id="cancelCustomCode" type="button">Cancel</button>
-      </form>
-    </section>
+      <section class="view" id="view-enhancement" data-title="Enhancement">
+        <article class="panel">
+          <div class="panel-head"><div><h2>Enhancement workspace</h2><p>Review deterministic plan state without changing CGHS rules.</p></div><span id="enhancementState">No plan</span></div>
+          <div class="subgrid">
+            <section><h3>Current Bill</h3><p id="enhancementBill" class="empty-text">No source bill is active.</p></section>
+            <section><h3>Execution Status</h3><p id="executionStatus" class="empty-text">Portal readiness has not been verified.</p></section>
+          </div>
+          <h3>EnhancementPlan</h3>
+          <p id="noPlanMessage" class="empty-text">No EnhancementPlan available.</p>
+          <div class="table-wrap" id="planTableWrap" hidden>
+            <table>
+              <thead><tr><th>Code</th><th>Quantity</th><th>Status</th><th>Source / Rule</th><th>Evidence</th></tr></thead>
+              <tbody id="planRows"></tbody>
+            </table>
+          </div>
+          <h3>Review Required</h3>
+          <p id="reviewSummary" class="empty-text">No review queue is loaded in this foundation screen.</p>
+          <h3>Diagnostics</h3>
+          <pre id="enhancementDiagnostics">No enhancement diagnostics available.</pre>
+        </article>
+      </section>
 
-    <section class="plan-view" id="registryView" aria-labelledby="registryTitle">
-      <div class="plan-head"><div><h3 id="registryTitle">Custom code registry</h3><p id="registryVersion">Persistent local records · loading</p></div><input id="registrySearch" type="search" placeholder="Search code or description" aria-label="Search custom codes"></div>
-      <div class="table-wrap"><table><thead><tr><th>Code</th><th>Description</th><th>Type</th><th>Status</th><th>Source</th><th>Updated</th><th>Actions</th></tr></thead><tbody id="registryRows"></tbody></table></div>
-      <pre id="customAudit" hidden></pre>
-    </section>
+      <section class="view" id="view-finalBill" data-title="Final Bill">
+        <article class="panel">
+          <div class="panel-head"><div><h2>Final Bill workspace</h2><p>Structure for final source, metadata, validation, preview, and output.</p></div><span id="finalBillState">NOT STARTED</span></div>
+          <div class="subgrid">
+            <section><h3>Final Bill Source</h3><p class="empty-text">No final bill PDF loaded.</p></section>
+            <section><h3>Extracted Sections</h3><p class="empty-text">No supported final-bill sections extracted.</p></section>
+            <section><h3>Editable Metadata</h3><p class="empty-text">Editable final-bill formatting is not enabled in Phase 1.</p></section>
+            <section><h3>Composition Preview</h3><p class="empty-text">Final bill composition engine is not yet enabled.</p></section>
+            <section><h3>Validation</h3><p class="empty-text">No final-bill validation has run.</p></section>
+            <section><h3>Output Status</h3><p class="empty-text">No final PDF has been generated.</p></section>
+          </div>
+          <button id="openFinalFolder" type="button">Open Final_Bills</button>
+        </article>
+      </section>
 
-    <section class="plan-view" id="portalView" hidden aria-labelledby="portalTitle">
-      <div class="plan-head"><div><h3 id="portalTitle">Portal execution boundary</h3><p>Uses the existing authenticated Chrome session at 127.0.0.1:9222. Login is never automated.</p></div><span id="portalStatus">PREVIEW</span></div>
-      <p id="portalSummary">Prepare actions to inspect executable and blocked records.</p>
-      <button class="primary-action" id="preparePortal" type="button">Prepare portal actions</button>
-      <button class="primary-action" id="executePortal" type="button" disabled>Execute verified actions</button>
-      <pre id="portalAudit" hidden></pre>
-    </section>
+      <section class="view" id="view-history" data-title="Audit / History">
+        <article class="panel">
+          <div class="panel-head"><div><h2>Audit / History</h2><p>Live state is separate from historical audit records.</p></div><span id="historyCount">0 records</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Timestamp</th><th>billSessionId</th><th>Operation</th><th>Status</th><th>Error</th></tr></thead>
+              <tbody id="historyRows"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
 
-    <section class="plan-view" id="finalBillView" aria-labelledby="finalBillTitle">
-      <div class="plan-head"><div><h3 id="finalBillTitle">Final bill after manual discharge</h3><p>Local parsing and completed-package storage only. This does not perform discharge or portal upload.</p></div><span id="finalBillStatus">NOT LOADED</span></div>
-      <div class="final-actions"><label><input id="manualDischargeConfirmed" type="checkbox"> I confirm portal verification and discharge were completed manually</label><button class="primary-action" id="loadFinalBill" type="button" disabled>Load final bill</button><button id="resolveFinalMatch" type="button" hidden>Resolve match</button><button class="primary-action" id="saveCompletedBill" type="button" disabled>Save completed bill</button></div>
-      <p id="finalBillMessage">Load an initial bill first.</p>
-      <div class="table-wrap"><table><thead><tr><th>Section</th><th>Item</th><th>Code</th><th>Quantity</th><th>Page</th><th>Status</th></tr></thead><tbody id="finalBillRows"></tbody></table></div>
-    </section>
+      <section class="view" id="view-settings" data-title="Settings">
+        <article class="panel">
+          <div class="panel-head"><div><h2>Settings</h2><p>Settings are persisted outside the packaged application. Credentials are not stored.</p></div><span id="settingsState">Loading</span></div>
+          <form id="settingsForm" class="settings-form">
+            <label>Storage location
+              <input id="settingsStoragePath" name="storagePath" autocomplete="off" spellcheck="false">
+            </label>
+            <label>Logging level
+              <select id="settingsLoggingLevel" name="loggingLevel"><option>DEBUG</option><option>INFO</option><option>WARN</option><option>ERROR</option></select>
+            </label>
+            <label class="check"><input id="settingsDiagnostics" name="diagnosticsEnabled" type="checkbox"> Diagnostics enabled</label>
+            <div class="actions"><button class="primary" type="submit">Save settings</button><button id="openConfigFolder" type="button">Open Config</button></div>
+          </form>
+          <p class="notice">Changing Storage location is persisted for controlled follow-up handling. Active runtime Storage is not silently switched mid-session.</p>
+        </article>
+      </section>
 
-    <section class="future" aria-label="Workflow boundaries">
-      <h3>Workflow boundaries</h3>
-      <p>Parsing, deterministic planning, and the controlled legacy portal boundary are available. Later workflow modules remain inactive.</p>
-      <div class="areas">
-        <article><span>01</span><h4>Bill ingestion</h4><p>Phase 2 parser available</p></article>
-        <article><span>02</span><h4>Rule evaluation</h4><p>Phase 3 local plan available</p></article>
-        <article><span>03</span><h4>Final bill workflow</h4><p>Not implemented</p></article>
-        <article><span>04</span><h4>Settings</h4><p>Foundation only</p></article>
-      </div>
-    </section>
-
-    <footer><span id="version">Version —</span><span id="storagePath">Storage path unavailable</span></footer>
-  </main>
+      <section class="view" id="view-diagnostics" data-title="Diagnostics">
+        <article class="panel">
+          <div class="panel-head"><div><h2>Diagnostics</h2><p>Safe technical status without credentials, cookies, tokens, or full environment dumps.</p></div><span id="diagnosticsState">Not collected</span></div>
+          <div class="actions"><button class="primary" id="collectDiagnostics" type="button">Collect diagnostics</button><button id="copyDiagnostics" type="button">Copy diagnostics</button><button id="openDiagnosticsFolder" type="button">Open diagnostics folder</button></div>
+          <pre id="diagnosticsOutput">Diagnostics have not been collected.</pre>
+        </article>
+      </section>
+    </main>
+  </div>
   <script src="renderer.js"></script>
 </body>
 </html>

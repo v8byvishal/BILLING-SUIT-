@@ -3,13 +3,15 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { loadConfig } = require('../core/config');
 const { ensureUserConfig, CURRENT_SCHEMA_VERSION } = require('../core/user-config');
 const { resolveRuntimePaths } = require('../core/runtime-paths');
 const { createLogger } = require('../core/logger');
 const { createAppState } = require('../core/app-state');
-const { ensureStorage, resolveStoragePath } = require('../core/storage');
+const { createApplicationStateStore, APP_STATUS, BILL_STATUS, ENHANCEMENT_STATUS, FINAL_BILL_STATUS, PORTAL_STATUS } = require('../core/application-state-store');
+const { SettingsStore } = require('../core/settings-store');
+const { STORAGE_FOLDERS, ensureStorage, getStorageInfo, resolveStoragePath } = require('../core/storage');
 const { createBundledRateRepository, evaluateBill } = require('../services/cghs');
 const { adaptEnhancementPlan } = require('../adapters/legacy-portal/plan-adapter');
 const { LegacyPythonRunner } = require('../adapters/legacy-portal/python-runner');
@@ -24,6 +26,8 @@ const { CaseWorkflowService } = require('../services/cases/case-workflow-service
 const { summarizeValidation, validateBill } = require('../services/validation/bill-validator');
 const { classifyDiscrepancy, saveValidation } = require('../services/validation/validation-store');
 const { ProductionValidationRunService } = require('../services/validation/production-validation-run');
+const { createDiagnosticsReport, ensureDiagnosticsFolder, writeDiagnosticsReport } = require('../services/diagnostics/diagnostics-service');
+const { OPERATIONS, registerPhase1Ipc } = require('./phase1-ipc');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
@@ -46,7 +50,10 @@ let caseWorkflow = null;
 let currentValidationReport = null;
 let productionValidationService = null;
 let currentProductionValidationRun = null;
+let settingsStore = null;
+let phase1Settings = null;
 const state = createAppState();
+const phase1State = createApplicationStateStore();
 
 function publicConfig() {
   return Object.freeze({
@@ -85,6 +92,150 @@ async function processInboxCandidate(kind,file){
   return kind==='initial' ? caseWorkflow.importInitial(file) : caseWorkflow.importFinalAutomatically(file);
 }
 
+
+function clearActiveBillWorkspace() {
+  currentBill = null;
+  currentEnhancementPlan = null;
+  currentExecutionAudit = null;
+  currentFinalBillPath = null;
+  currentCompletedBill = null;
+  currentValidationReport = null;
+  currentProductionValidationRun = null;
+  currentCaseId = null;
+  state.set('IDLE');
+  phase1State.resetCurrentBill();
+}
+
+function billMetadataForState(bill, manifest = null) {
+  if (!bill && !manifest) return null;
+  return {
+    caseId: manifest?.case_id || currentCaseId || null,
+    workflowStatus: manifest?.workflow_status || null,
+    fileName: bill?.source?.file_name || manifest?.initial_pdf_reference?.file_name || null,
+    sha256: bill?.source?.sha256 || manifest?.initial_pdf_hash || null,
+    pages: bill?.metadata?.page_count ?? null,
+    billNumber: bill?.billing?.bill_number || manifest?.bill_number || null,
+    patientName: bill?.patient?.name || null,
+    uhid: bill?.patient?.uhid || manifest?.uhid || null,
+    ipNumber: bill?.patient?.ip_number || manifest?.ip_number || null,
+    sections: (bill?.sections || []).map((section) => section.section_type),
+    excludedSections: (bill?.excluded_sections || []).map((section) => section.section_type)
+  };
+}
+
+function enhancementStatusForPlan(plan) {
+  if (!plan) return ENHANCEMENT_STATUS.NOT_STARTED;
+  if ((plan.execution_summary?.review_required || []).length || (plan.unknown_codes || []).length || (plan.unresolved_codes || []).length) return ENHANCEMENT_STATUS.REVIEW_REQUIRED;
+  if ((plan.execution_summary?.executable || []).length) return ENHANCEMENT_STATUS.READY;
+  return ENHANCEMENT_STATUS.NOT_STARTED;
+}
+
+async function selectAndParseSourceBill() {
+  const selection = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select hospital bill PDF',
+    properties: ['openFile'],
+    filters: [{ name: 'PDF documents', extensions: ['pdf'] }]
+  });
+  if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
+  state.set('ANALYZING');
+  clearActiveBillWorkspace();
+  try {
+    const filePath = selection.filePaths[0];
+    const source = { file_path: filePath, file_name: path.basename(filePath), sha256: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') };
+    const result = await caseWorkflow.importInitial(source);
+    if (result.outcome === 'EXACT_DUPLICATE') {
+      phase1State.appendHistory({ operation: 'SOURCE_BILL_DUPLICATE', status: 'EXACT_DUPLICATE', source_reference: source });
+      return { canceled: false, duplicate: true, case: result.case, appState: phase1State.snapshot() };
+    }
+    if (!result.bill || !result.plan) throw new Error(result.reason || result.outcome);
+    currentCaseId = result.case.case_id;
+    currentBill = result.bill;
+    currentEnhancementPlan = result.plan;
+    currentExecutionAudit = null;
+    currentFinalBillPath = null;
+    currentCompletedBill = null;
+    currentValidationReport = null;
+    customCodeRegistry.recordPlanUsage(result.plan);
+    state.set('BILL_LOADED');
+    const billSessionId = phase1State.startBillSession({
+      source,
+      metadata: billMetadataForState(result.bill, result.case)
+    });
+    phase1State.setEnhancement({
+      billSessionId,
+      status: enhancementStatusForPlan(result.plan),
+      plan: result.plan,
+      diagnostics: result.plan.warnings || []
+    });
+    logger.info('Case initial bill parsed and plan persisted', { caseId: currentCaseId, billSessionId, pages: result.bill.parsing_audit.pages_processed, planEntries: result.plan.entries.length, workflowStatus: result.case.workflow_status });
+    return { canceled: false, billSessionId, case: result.case, bill: result.bill, enhancementPlan: result.plan, appState: phase1State.snapshot() };
+  } catch (error) {
+    state.set('ERROR');
+    phase1State.setAppStatus(APP_STATUS.ERROR, error.message);
+    phase1State.appendHistory({ operation: 'SOURCE_BILL_PARSE', status: 'FAILED', error_code: error.code || 'APP_INTERNAL_ERROR' });
+    logger.error('Bill PDF parsing failed', error);
+    throw new Error(`Bill could not be parsed: ${error.message}`);
+  }
+}
+
+function createPhase1Handlers() {
+  return {
+    [OPERATIONS.APP_GET_INFO]: () => ({
+      productName: 'CGHS Billing Suite VNEXT',
+      version: app.getVersion(),
+      environment: config?.environment || 'production',
+      electronVersion: process.versions.electron || null,
+      nodeVersion: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      branchLocked: 'arena/01a0dfad-billing-suit'
+    }),
+    [OPERATIONS.APP_GET_STATUS]: () => phase1State.snapshot(),
+    [OPERATIONS.APP_GET_DIAGNOSTICS]: () => {
+      const report = createDiagnosticsReport({
+        storageRoot: storageInfo?.path || null,
+        appInfo: { version: app.getVersion(), packaged: app.isPackaged, environment: config?.environment, electronVersion: process.versions.electron || null },
+        billSessionId: phase1State.getCurrentBillSessionId(),
+        applicationState: phase1State.snapshot()
+      });
+      phase1State.setDiagnostics({ records: [report] });
+      return report;
+    },
+    [OPERATIONS.STORAGE_GET_STATUS]: () => {
+      storageInfo = getStorageInfo(storageInfo.path);
+      phase1State.setStorageStatus(storageInfo);
+      return storageInfo;
+    },
+    [OPERATIONS.STORAGE_OPEN_ROOT]: async () => ({ path: storageInfo.path, result: await shell.openPath(storageInfo.path) }),
+    [OPERATIONS.STORAGE_OPEN_FOLDER]: async (payload = {}) => {
+      const name = String(payload.name || '');
+      if (!STORAGE_FOLDERS.includes(name)) throw new Error(`Unsupported Storage folder: ${name}`);
+      const folder = path.join(storageInfo.path, name);
+      fs.mkdirSync(folder, { recursive: true });
+      return { path: folder, result: await shell.openPath(folder) };
+    },
+    [OPERATIONS.STORAGE_LIST_RECENT]: () => caseStore ? caseStore.list().slice(0, 10).map((item) => ({ caseId: item.case_id, billNumber: item.bill_number, status: item.workflow_status, updatedAt: item.updated_at })) : [],
+    [OPERATIONS.BILL_GET_CURRENT]: () => phase1State.snapshot().currentBill,
+    [OPERATIONS.BILL_CLEAR_CURRENT]: () => { clearActiveBillWorkspace(); return phase1State.snapshot().currentBill; },
+    [OPERATIONS.BILL_RESET]: () => { clearActiveBillWorkspace(); return phase1State.snapshot(); },
+    [OPERATIONS.BILL_SELECT]: () => selectAndParseSourceBill(),
+    [OPERATIONS.ENHANCEMENT_GET_PLAN]: () => currentEnhancementPlan ? { billSessionId: phase1State.getCurrentBillSessionId(), plan: currentEnhancementPlan } : { billSessionId: phase1State.getCurrentBillSessionId(), plan: null, message: 'No EnhancementPlan available.' },
+    [OPERATIONS.ENHANCEMENT_GET_STATUS]: () => phase1State.snapshot().enhancement,
+    [OPERATIONS.FINAL_BILL_GET_STATUS]: () => phase1State.snapshot().finalBill,
+    [OPERATIONS.SETTINGS_GET]: () => ({ publicConfig: publicConfig(), settings: phase1Settings, configSchemaVersion: CURRENT_SCHEMA_VERSION }),
+    [OPERATIONS.SETTINGS_UPDATE]: (payload = {}) => {
+      phase1Settings = settingsStore.update(payload);
+      phase1State.setSettings({ publicConfig: publicConfig(), settings: phase1Settings });
+      return { settings: phase1Settings, restartRequired: Object.prototype.hasOwnProperty.call(payload, 'storagePath') };
+    },
+    [OPERATIONS.HISTORY_LIST]: () => phase1State.snapshot().history,
+    [OPERATIONS.DIAGNOSTICS_OPEN_FOLDER]: async () => {
+      const folder = ensureDiagnosticsFolder(storageInfo.path);
+      return { path: folder, result: await shell.openPath(folder) };
+    }
+  };
+}
+
 function registerIpc() {
   ipcMain.handle('app:get-status', () => ({ ready: true, state: state.get(), version: app.getVersion() }));
   ipcMain.handle('storage:get-info', () => storageInfo);
@@ -96,7 +247,7 @@ function registerIpc() {
   ipcMain.handle('production-validation:add-note',(_event,input)=>{if(!currentProductionValidationRun)throw new Error('No production validation run');currentProductionValidationRun=productionValidationService.addNote(currentProductionValidationRun,input);return currentProductionValidationRun;});
   ipcMain.handle('production-validation:preflight',(_event,input)=>{if(!currentProductionValidationRun)throw new Error('No production validation run');const request=adaptEnhancementPlan(currentEnhancementPlan,{registrySnapshot:customCodeRegistry.snapshot()});const held=caseLock.read();return productionValidationService.preflight(currentProductionValidationRun,{...input,activeCaseId:currentCaseId,lockAvailable:!held||held.case_id===currentCaseId,executableCount:request.actions.length,unsafeActionCount:0});});
   ipcMain.handle('validation:classify',(_event,id,decision)=>{if(!currentValidationReport)throw new Error('No validation report is active');currentValidationReport=classifyDiscrepancy(currentValidationReport,id,decision);saveValidation(caseStore,currentCaseId,currentValidationReport);return currentValidationReport;});
-  ipcMain.handle('cases:open',(_event,id)=>{const manifest=caseWorkflow.openCase(id);currentCaseId=id;const initialPath=path.join(caseStore.directory(id),'normalized','initial-bill.json');const planPath=path.join(caseStore.directory(id),'enhancement','plan.json');currentBill=fs.existsSync(initialPath)?JSON.parse(fs.readFileSync(initialPath)):null;currentEnhancementPlan=fs.existsSync(planPath)?JSON.parse(fs.readFileSync(planPath)):null;currentValidationReport=null;return{manifest,bill:currentBill,enhancementPlan:currentEnhancementPlan};});
+  ipcMain.handle('cases:open',(_event,id)=>{const manifest=caseWorkflow.openCase(id);currentCaseId=id;const initialPath=path.join(caseStore.directory(id),'normalized','initial-bill.json');const planPath=path.join(caseStore.directory(id),'enhancement','plan.json');currentBill=fs.existsSync(initialPath)?JSON.parse(fs.readFileSync(initialPath)):null;currentEnhancementPlan=fs.existsSync(planPath)?JSON.parse(fs.readFileSync(planPath)):null;currentValidationReport=null;if(currentBill){const billSessionId=phase1State.startBillSession({source:currentBill.source||manifest.initial_pdf_reference,metadata:billMetadataForState(currentBill,manifest)});if(currentEnhancementPlan)phase1State.setEnhancement({billSessionId,status:enhancementStatusForPlan(currentEnhancementPlan),plan:currentEnhancementPlan,diagnostics:currentEnhancementPlan.warnings||[]});}return{manifest,bill:currentBill,enhancementPlan:currentEnhancementPlan,appState:phase1State.snapshot()};});
   ipcMain.handle('inbox:scan',async(_event,kind='initial')=>{const files=inboxScanner.scan(kind);const outcomes=[];for(const file of files.filter(x=>x.status==='STABLE'))outcomes.push(await processInboxCandidate(kind,file));return{files,outcomes,cases:caseStore.list()};});
   ipcMain.handle('watcher:status',()=>inboxWatcher.status());
   ipcMain.handle('watcher:start',()=>inboxWatcher.start());
@@ -104,31 +255,7 @@ function registerIpc() {
   ipcMain.handle('watcher:resume',()=>inboxWatcher.resume());
   ipcMain.handle('watcher:stop',()=>inboxWatcher.stop());
   ipcMain.handle('watcher:scan-now',()=>inboxWatcher.scanNow());
-  ipcMain.handle('bill:select-and-parse', async () => {
-    const selection = await dialog.showOpenDialog(mainWindow, {
-      title: 'Select hospital bill PDF',
-      properties: ['openFile'],
-      filters: [{ name: 'PDF documents', extensions: ['pdf'] }]
-    });
-    if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
-    state.set('ANALYZING');
-    try {
-      const filePath = selection.filePaths[0];
-      const source = { file_path: filePath, file_name: path.basename(filePath), sha256: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') };
-      const result = await caseWorkflow.importInitial(source);
-      if (result.outcome === 'EXACT_DUPLICATE') return { canceled: false, duplicate: true, case: result.case };
-      if (!result.bill || !result.plan) throw new Error(result.reason || result.outcome);
-      currentCaseId = result.case.case_id; currentBill = result.bill; currentEnhancementPlan = result.plan;
-      currentExecutionAudit = null; currentFinalBillPath = null; currentCompletedBill = null; currentValidationReport = null;
-      customCodeRegistry.recordPlanUsage(result.plan); state.set('BILL_LOADED');
-      logger.info('Case initial bill parsed and plan persisted', { caseId: currentCaseId, pages: result.bill.parsing_audit.pages_processed, planEntries: result.plan.entries.length, workflowStatus: result.case.workflow_status });
-      return { canceled: false, case: result.case, bill: result.bill, enhancementPlan: result.plan };
-    } catch (error) {
-      state.set('ERROR');
-      logger.error('Bill PDF parsing failed', error);
-      throw new Error(`Bill could not be parsed: ${error.message}`);
-    }
-  });
+  ipcMain.handle('bill:select-and-parse', () => selectAndParseSourceBill());
   ipcMain.handle('review:list', () => currentEnhancementPlan ? createReviewQueue(currentEnhancementPlan, currentValidationReport?.discrepancies || []) : []);
   ipcMain.handle('review:record', (_event, decision) => customCodeRegistry.recordReview(decision));
   ipcMain.handle('custom-codes:list', (_event, filters) => ({ records: customCodeRegistry.list(filters), registry: customCodeRegistry.snapshot() }));
@@ -215,6 +342,10 @@ function createWindow() {
     }
   });
   mainWindow.removeMenu();
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    if (!String(targetUrl || '').startsWith('file://')) event.preventDefault();
+  });
   mainWindow.loadFile(path.join(APP_DIR, 'src', 'ui', 'index.html'));
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -237,10 +368,18 @@ async function bootstrap() {
     config = loadConfig({ appDir: APP_DIR, configFile:userConfigPath, rawConfig:userConfig.value });
     const storagePath = resolveStoragePath({
       configuredPath: config.storagePath,
+      appDataPath: app.getPath('appData'),
       documentsPath: app.getPath('documents'),
       appDir: APP_DIR
     });
     storageInfo = ensureStorage(storagePath);
+    settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'phase1-settings.json'));
+    phase1Settings = settingsStore.load();
+    if (!phase1Settings.storagePath) phase1Settings = settingsStore.save({ storagePath, loggingLevel: config.logging.level, diagnosticsEnabled: true });
+    phase1State.setAppInfo({ productName: 'CGHS Billing Suite VNEXT', version: app.getVersion(), environment: config.environment, packaged: app.isPackaged });
+    phase1State.setAppStatus(APP_STATUS.READY, 'Application ready');
+    phase1State.setStorageStatus(storageInfo);
+    phase1State.setSettings({ publicConfig: publicConfig(), settings: phase1Settings });
     logger = createLogger({ logsDir: path.join(storagePath, 'Logs'), level: config.logging.level, source: 'desktop-main' });
     customCodeRegistry = new CustomCodeRegistry(storagePath);
     rebuildRateRepository();
@@ -258,6 +397,7 @@ async function bootstrap() {
       rateAuthority: rateRepository.provenance.authority_status,
       recoveredCases: recoveredCases.length
     });
+    registerPhase1Ipc(ipcMain, createPhase1Handlers());
     registerIpc();
     createWindow();
   } catch (error) {
@@ -265,6 +405,7 @@ async function bootstrap() {
       try {
         const fallbackStorage = resolveStoragePath({
           configuredPath: null,
+          appDataPath: app.getPath('appData'),
           documentsPath: app.getPath('documents'),
           appDir: APP_DIR
         });
