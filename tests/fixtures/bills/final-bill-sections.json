@@ -1,0 +1,9 @@
+{
+  "source": {"file_name":"synthetic-final-bill.pdf","sha256":"final-fixture-sha256","byte_size":12345},
+  "pages": [
+    {"page_number":1,"lines":["Bill No: SYN-500","UHID: UH-500","IP No: IP-500","IP Pharmacy","Service: Medicine A | Code: B126 | Qty: 2 | Unit: TAB","Service: Medicine A | Code: B126 | Qty: 3 | Unit: TAB","OP Pharmacy","Service: Medicine A | Code: B126 | Qty: 1 | Unit: TAB"],"raw_text":"Bill No: SYN-500\nUHID: UH-500\nIP No: IP-500\nIP Pharmacy\nService: Medicine A | Code: B126 | Qty: 2 | Unit: TAB\nService: Medicine A | Code: B126 | Qty: 3 | Unit: TAB\nOP Pharmacy\nService: Medicine A | Code: B126 | Qty: 1 | Unit: TAB"},
+    {"page_number":2,"lines":["OT Pharmacy","Service: OT Medicine | Code: B075 | Qty: 2","OT Consumables","Service: OT Item | Code: B068 | Qty: 4","Ward Consumables","Service: Ward Item | Code: B126 | Qty: 5","Cathlab Consumables","Service: Cath Item | Code: B075 | Qty: 6"],"raw_text":"OT Pharmacy\nService: OT Medicine | Code: B075 | Qty: 2\nOT Consumables\nService: OT Item | Code: B068 | Qty: 4\nWard Consumables\nService: Ward Item | Code: B126 | Qty: 5\nCathlab Consumables\nService: Cath Item | Code: B075 | Qty: 6"},
+    {"page_number":3,"lines":["Patient Payable","IP Pharmacy","Service: Excluded Medicine | Code: B126 | Qty: 99","Patient Payable Total: 9900","Lab Consumables","Service: Other Item | Code: B068 | Qty: 1"],"raw_text":"Patient Payable\nIP Pharmacy\nService: Excluded Medicine | Code: B126 | Qty: 99\nPatient Payable Total: 9900\nLab Consumables\nService: Other Item | Code: B068 | Qty: 1"}
+  ],
+  "expected": {"ip_pharmacy_quantity":5,"op_pharmacy_quantity":1,"excluded_quantity":99,"sections":["IP_PHARMACY","OP_PHARMACY","OT_PHARMACY","OT_CONSUMABLES","WARD_CONSUMABLES","CATHLAB_CONSUMABLES","OTHER_CONSUMABLES"]}
+}

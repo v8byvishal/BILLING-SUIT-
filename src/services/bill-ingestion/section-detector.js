@@ -6,6 +6,7 @@ const SECTION_MARKERS = Object.freeze([
   ['EQUIPMENT', /^equipment(?:\s*\(.*\))?$/i],
   ['INVESTIGATIONS', /^investigations?(?:\s*\(.*\))?$/i],
   ['IP_PHARMACY', /^ip\s+pharmacy(?:\s*\(.*\))?$/i],
+  ['OP_PHARMACY', /^op\s+pharmacy(?:\s*\(.*\))?$/i],
   ['NON_INVASIVE_PROCEDURE', /^non\s+invasive\s+procedure(?:\s*\(.*\))?$/i],
   ['OT_CONSUMABLES', /^ot\s+consumables?(?:\s*\(.*\))?$/i],
   ['OT_PHARMACY', /^ot\s+pharmacy(?:\s*\(.*\))?$/i],
@@ -15,7 +16,10 @@ const SECTION_MARKERS = Object.freeze([
   ['HOSPITAL_SERVICES', /^hospital\s+services?(?:\s*\(.*\))?$/i],
   ['MEDICAL_SERVICES', /^medical\s+services?(?:\s*\(.*\))?$/i],
   ['WARDS_OTHERS', /^wards?\s+others?(?:\s*\(.*\))?$/i],
-  ['CONSUMABLES', /^(?:ward\s+|cathlab\s+)?consumables?(?:\s*\(.*\))?$/i],
+  ['WARD_CONSUMABLES', /^(?:ward|room)\s+consumables?(?:\s*\(.*\))?$/i],
+  ['CATHLAB_CONSUMABLES', /^cath\s*lab\s+consumables?(?:\s*\(.*\))?$/i],
+  ['CONSUMABLES', /^consumables?(?:\s*\(.*\))?$/i],
+  ['OTHER_CONSUMABLES', /^(?!.*\bpharmacy\b)(?!.*\/)[A-Za-z][A-Za-z &-]{1,40}\s+consumables?(?:\s*\(.*\))?$/i],
   ['BED_DETAILS', /^bed\s+details?$/i]
 ]);
 

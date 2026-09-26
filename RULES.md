@@ -61,6 +61,16 @@ The existing Python Selenium executor remains authoritative for procedure search
 - Compound expressions remain unresolved and cannot be converted by description similarity or automatic expansion.
 - Plans record relevant custom-record fingerprints. A material registry change causes `PLAN_STALE` at the Phase 4 adapter boundary.
 
+## Phase 7 final-bill policy
+
+- Final-bill enrichment is separate from enhancement and cannot add portal actions or mutate the historical EnhancementPlan.
+- Only explicit IP/OP/OT Pharmacy and labelled Consumables section context is extracted; pharmacy and consumables remain separate.
+- Patient Payable final sections remain audit-only exclusions.
+- Exact duplicates aggregate only within the same section identity. Identical items across sections remain separate.
+- Unknown, malformed, uncoded, and compound records remain review-required; no product-description-to-code mapping is inferred.
+- Initial/final association uses exact bill number, UHID, and IP number comparisons. Conflicts stop; missing shared identifiers require an audited manual match.
+- A bill is `COMPLETED` only after a review-free matched record is durably stored. Duplicate final hashes are blocked unless explicitly reprocessed as a new version.
+
 ## Prohibited scope
 
 No second Selenium engine, selector duplication, credential/login automation, security bypass, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented. Settlement remains isolated under `src/services/settlement/`.

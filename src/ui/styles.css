@@ -39,6 +39,9 @@ td button { margin:2px 4px 2px 0; border:1px solid var(--line); border-radius:5p
 .registry-form[hidden] { display:none; }
 .registry-form input,.registry-form select,#registrySearch { min-width:0; border:1px solid var(--line); border-radius:6px; padding:8px; background:#fff; }
 .registry-form label { display:flex; align-items:center; gap:6px; }
+.final-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:14px 20px; }
+.final-actions .primary-action { margin-top:0; }
+#finalBillMessage { margin:0; padding:0 20px 14px; color:var(--muted); }
 pre { margin:0; padding:16px 20px; overflow:auto; max-height:260px; border-top:1px solid var(--line); background:#f8f9fa; font-size:11px; }
 .future h3 { margin:0; font-size:18px; }
 .future > p { margin:5px 0 16px; color:var(--muted); }

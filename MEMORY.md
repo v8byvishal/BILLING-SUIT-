@@ -2,60 +2,73 @@
 
 ## Current phase
 
-**Phase 6 — Review Queue, Custom/Unslotted Code Registry & Controlled User Overrides: complete for review.**
+**Phase 7 — Post-Discharge Final Bill Ingestion, Pharmacy/Consumables Extraction & Completed-Bill Storage: complete for review.**
 
-Phase 1–5 parser/rules and the Phase 4 legacy portal architecture remain intact. No fuzzy resolution, second rate system, Selenium logic, settlement, discharge, final bill, folder automation, or production pharmacy/OT workflow was added.
+The user remains responsible for portal verification and manual discharge. Phase 7 adds no portal navigation, discharge click, login, final-bill upload, folder watcher, settlement, or reconciliation service.
 
-## Persistent custom registry
+## Final bill workflow
 
-- Service: `src/services/custom-codes/custom-code-registry.js`
-- Runtime definitions: `Storage/Custom_Codes/registry.json`
-- Runtime audit: `Storage/Audit/custom-code-audit.jsonl`
-- Both paths are outside the executable and created through the existing Storage architecture.
-- Registry JSON uses atomic temporary-file rename; audit is append-only JSON Lines.
-- Records preserve original entry, canonical exact code, description, optional unit/rate, `MANUAL`/`FIXED`/`PER_DAY` behavior, reason, source, operator, timestamps, active state, override state/reference evidence, notes, scope, and revisions.
+`src/services/final-bill/` reuses the Phase 2 `ingestBillPdf` pipeline and keeps INITIAL BILL and FINAL BILL as distinct normalized models. The CompletedBill links source hashes/files, safe metadata, the historical EnhancementPlan reference, optional execution audit reference, extracted/excluded/review records, reconciliation, storage audit, run ID, timestamp, and status. It does not duplicate full PDF text.
 
-The bundled 1,998-record `hfos-reference-rates.json` remains byte-identical with SHA-256 `b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba` and remains `RATE_SOURCE_UNDEFINED`.
+Supported explicit sections:
 
-## Deterministic resolution and planning
+- IP Pharmacy
+- OP Pharmacy
+- OT Pharmacy
+- OT Consumables
+- Ward/Room Consumables
+- Cathlab Consumables
+- Generic Consumables
+- Other clearly labelled `<name> Consumables`
 
-- Reference code wins by default.
-- Exact active custom code resolves as `CUSTOM/LOCAL` only after explicit creation.
-- Reference collision requires `override_authoritative: true` and records reference state plus `OVERRIDE_ENABLED` audit.
-- Inactive custom codes resolve as unknown.
-- Only positive integer `FIXED` quantity behavior can become `CUSTOM_VALID` in Phase 6. `MANUAL` and `PER_DAY` remain review-required; no formulas are accepted.
-- Custom rate is optional and undefined rates are never fabricated.
-- EnhancementPlan captures registry revision, global hash, and relevant per-code fingerprints.
-- The Phase 4 adapter compares current relevant fingerprints and throws `PLAN_STALE` before execution when a material definition changed.
-- Valid `CUSTOM_VALID` actions can cross the existing Phase 4 boundary; unknown/manual/unresolved records remain blocked.
+Patient Payable remains excluded. Aggregation is exact and section-scoped. Explicit codes reuse existing reference/custom resolution. Unknown, compound, invalid, uncoded, missing-section, and ambiguous-heading cases remain review-required. Final enrichment never mutates or reruns the EnhancementPlan.
 
-## Review workflow and UI
+## Matching and status
 
-`review-queue.js` projects unknown, malformed, unresolved compound, rule-undefined, review-required, unsupported evidence, and missing-code advisories from the existing EnhancementPlan. It exposes raw/normalized evidence, code, page, section, quantity, parser/rule decisions, reason, status, and Review/Add Custom/Dismiss actions.
+Exact comparisons use bill number, UHID, and IP number. Any present conflict returns `MATCH_REQUIRED`; no shared identifier also requires matching. The UI permits an explicit operator/reason manual resolution. Review-free matched records are `PARSED`; unresolved records are `REVIEW_REQUIRED`; only durable save changes status to `COMPLETED`.
 
-Bill-specific review decisions are audit events only and do not create global codes. The minimal UI adds the review table and custom registry with exact text search, add, edit, deactivate/reactivate, and audit viewing. There is no auto-approve action.
+## External storage
 
-Audit actions include `CREATED`, `UPDATED`, `DEACTIVATED`, `REACTIVATED`, `OVERRIDE_ENABLED`, `OVERRIDE_DISABLED`, `USED_IN_PLAN`, `BLOCKED`, and `REVIEWED`, with actor/reason/source and limited bill identity context.
+Packages are written outside the executable:
 
-## Validation
+`Storage/Bills/YYYY/MM/<bill-run-vN>/`
 
-- Before Phase 6: **63 tests**.
-- After Phase 6: `npm test` — **83 passed, 0 failed, 0 skipped**.
-- Phase 6 adds 20 deterministic cases covering creation, malformed/duplicate rejection, collision/override, unknown→custom resolution, deactivation, advisory safety, global vs bill scope, restart persistence, registry hashes, stale plans, Phase 4 admission/blocking, snapshot immutability, and audit.
+- `final/<source PDF>` when a local final path is provided
+- `normalized/completed-bill.json`
+- `audit/extraction-audit.json`
+
+`Storage/Bills/completed-index.json` tracks final SHA-256, run, version, and package path. Duplicate hashes return `DUPLICATE_FINAL_PDF`. Explicit reprocessing creates version N+1 without overwriting history. Temporary directories and atomic JSON rename are used; failures return `SAVE_FAILED` and never report completion.
+
+## Fixtures and validation
+
+Synthetic fixture: `tests/fixtures/bills/final-bill-sections.json`.
+
+Phase 7 adds 22 deterministic cases for all supported sections, multi-page extraction, Patient Payable exclusion, same-section duplicates, cross-section separation, unknown/compound/missing/ambiguous review, deterministic match/mismatch/manual resolution, duplicate hash, save success/failure, reprocessing versioning, and a 1,000-row final bill.
+
+- Before Phase 7: **83 tests**.
+- After Phase 7: `npm test` — **105 passed, 0 failed, 0 skipped**.
 - JavaScript syntax checks over all `src/**/*.js`: passed.
-- Python syntax checks for `app (1).py` and `portal_bridge.py`: passed; Phase 6 changed no Python.
+- Python syntax checks for `app (1).py` and `portal_bridge.py`: passed; Phase 7 changed no Python.
 - `git diff --check`: passed.
 - `npm audit --omit=dev`: **0 vulnerabilities**.
-- Reference snapshot SHA-256 remained `b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba`.
+- Reference snapshot SHA-256 remains `b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba`.
+- Real PDF regression: **NOT RUN**; named production PDFs were not accessible in the workspace.
 - Live portal testing: **NOT RUN — LIVE PORTAL REQUIRED**.
+
+## Preserved boundaries
+
+- The 1,998-record snapshot remains `RATE_SOURCE_UNDEFINED` and unchanged.
+- Custom registry, review queue, registry hashes, and `PLAN_STALE` remain intact.
+- Phase 4 EnhancementPlan → adapter → legacy Selenium/CDP remains unchanged in architecture.
+- `src/services/settlement/` remains isolated and untouched.
 
 ## Git
 
 - Branch: `arena/01a0de46-billing-suit`
-- Phase 5 commit: `69227b6`
+- Phase 6 commit: `577a677`
 - PR #1 remains open and must not be merged automatically.
-- Phase 6 commit is pending at the time of this entry.
+- Phase 7 commit is pending at the time of this entry.
 
 ## Stop point
 
-Stop after Phase 6. Do not begin discharge, final bill upload, folder automation, production pharmacy/OT extraction, or Settlement/Reconciliation.
+Stop after Phase 7. Do not begin automated discharge/download, folder watching, broader portal control, Settlement/Reconciliation, or advanced AI review.

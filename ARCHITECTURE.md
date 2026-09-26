@@ -128,6 +128,20 @@ Resolution is deterministic: reference records win by default; active custom rec
 
 The review queue is a projection of the existing EnhancementPlan and shows evidence rather than creating a second plan model. Bill-specific dismiss/review events never become global definitions. The minimal UI exposes review, explicit add, exact text search, edit, deactivate/reactivate, and audit actions.
 
+## Phase 7 final-bill boundary
+
+Phase 7 reuses `ingestBillPdf` and the normalized bill model for a second, explicitly separate FINAL BILL source. `src/services/final-bill/` extracts only recognized IP/OP/OT Pharmacy and OT/Ward/Cathlab/other explicitly labelled Consumables sections. Patient Payable records remain excluded. Exact code resolution reuses the existing rate/custom repository; enrichment records never mutate or rerun the historical EnhancementPlan.
+
+```text
+Initial Bill → immutable EnhancementPlan / optional execution reference
+User manually verifies and discharges
+Final PDF → existing ingestion pipeline → section-aware enrichment
+  → deterministic identifier reconciliation (or MATCH_REQUIRED)
+  → CompletedBill → external immutable package
+```
+
+Deterministic matching compares bill number, UHID, and IP number. Any conflict stops automatic association; no shared identifier requires an explicit operator/reason resolution. Storage writes versioned packages under `Storage/Bills/YYYY/MM/<bill-run-vN>/` with normalized JSON, extraction audit, and one final-PDF copy when available. A SHA-256 index blocks duplicate final PDFs unless explicit reprocessing creates a new version. Temporary directories and atomic JSON writes prevent silent overwrite; save errors return `SAVE_FAILED` and never `COMPLETED`.
+
 ## Development and packaging
 
 - Install pinned dependencies: `npm install`

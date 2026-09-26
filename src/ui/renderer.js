@@ -3,6 +3,7 @@
 let portalPreview = null;
 let currentReviewQueue = [];
 let selectedReview = null;
+let currentCompletedBill = null;
 
 function button(label, onClick) {
   const element = document.createElement('button'); element.type = 'button'; element.textContent = label; element.addEventListener('click', onClick); return element;
@@ -62,6 +63,7 @@ async function selectAndParseBill() {
     text('excludedSections', bill.excluded_sections.length);
     text('parseMessage', `${bill.sections.length} primary section(s), ${bill.parsing_audit.compound_expressions.length} compound expression(s), ${bill.bed_details.length} Bed Detail row(s), ${result.enhancementPlan.entries.length} plan entry/entries. No portal operation was performed.`);
     renderPlan(result.enhancementPlan);
+    document.getElementById('loadFinalBill').disabled = false;
     await loadReviewQueue();
     text('appState', 'BILL_LOADED');
   } catch (error) {
@@ -141,6 +143,44 @@ async function saveCustomCode(event) {
   } catch (error) { window.alert(error.message); }
 }
 
+function renderCompletedBill(completed) {
+  currentCompletedBill = completed;
+  text('finalBillStatus', completed.status);
+  text('finalBillMessage', `Match: ${completed.reconciliation.decision}. ${completed.pharmacy_records.length} pharmacy aggregate(s), ${completed.consumable_records.length} consumable aggregate(s), ${completed.excluded_sections.length} excluded, ${completed.review_required_records.length} requiring review.`);
+  const body = document.getElementById('finalBillRows'); body.replaceChildren();
+  for (const record of [...completed.pharmacy_records, ...completed.consumable_records, ...completed.excluded_sections, ...completed.review_required_records.filter((r) => !r.section)]) {
+    const row = document.createElement('tr');
+    for (const value of [record.section, record.description || record.raw_text, record.normalized_code || record.code, displayNumber(record.quantity), record.source_page, record.status]) {
+      const cell = document.createElement('td'); cell.textContent = value || '—'; row.appendChild(cell);
+    }
+    body.appendChild(row);
+  }
+  document.getElementById('resolveFinalMatch').hidden = completed.status !== 'MATCH_REQUIRED';
+  document.getElementById('saveCompletedBill').disabled = completed.status !== 'PARSED';
+}
+
+async function loadFinalBill() {
+  if (!document.getElementById('manualDischargeConfirmed').checked) { window.alert('Confirm manual portal verification and discharge before loading the final bill.'); return; }
+  text('finalBillStatus', 'PARSING');
+  try { const result = await window.vnext.selectAndParseFinalBill(); if (!result.canceled) renderCompletedBill(result.completedBill); }
+  catch (error) { text('finalBillStatus', 'FAILED'); text('finalBillMessage', error.message); }
+}
+
+async function resolveFinalMatch() {
+  const operator = window.prompt('Operator identifier'); const reason = window.prompt('Reason this final bill belongs to the loaded initial bill');
+  if (!operator || !reason) return;
+  try { renderCompletedBill(await window.vnext.resolveFinalBillMatch({ operator, reason })); } catch (error) { window.alert(error.message); }
+}
+
+async function saveFinalBill() {
+  try {
+    const result = await window.vnext.saveCompletedBill({ allowReprocess: false });
+    text('finalBillStatus', result.status);
+    text('finalBillMessage', result.status === 'COMPLETED' ? `Saved completed package: ${result.package_path}` : result.status === 'DUPLICATE_FINAL_PDF' ? 'This final PDF is already stored.' : result.reason);
+    if (result.status === 'COMPLETED') document.getElementById('saveCompletedBill').disabled = true;
+  } catch (error) { text('finalBillStatus', 'SAVE_FAILED'); text('finalBillMessage', error.message); }
+}
+
 async function preparePortal() {
   try {
     portalPreview = await window.vnext.previewPortalActions();
@@ -187,6 +227,9 @@ async function initialize() {
     document.getElementById('customCodeForm').addEventListener('submit', saveCustomCode);
     document.getElementById('cancelCustomCode').addEventListener('click', () => { document.getElementById('customCodeForm').hidden = true; selectedReview = null; });
     document.getElementById('registrySearch').addEventListener('input', loadRegistry);
+    document.getElementById('loadFinalBill').addEventListener('click', loadFinalBill);
+    document.getElementById('resolveFinalMatch').addEventListener('click', resolveFinalMatch);
+    document.getElementById('saveCompletedBill').addEventListener('click', saveFinalBill);
     await loadRegistry();
     await window.vnext.reportRendererReady();
   } catch (error) {

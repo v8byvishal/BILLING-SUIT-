@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld('vnext', Object.freeze({
   getCustomCodeAudit: (code) => invoke('custom-codes:audit', code),
   previewPortalActions: () => invoke('portal:preview'),
   executePortalActions: () => invoke('portal:execute'),
+  selectAndParseFinalBill: () => invoke('final-bill:select-and-parse'),
+  resolveFinalBillMatch: (decision) => invoke('final-bill:resolve-match', decision),
+  saveCompletedBill: (options) => invoke('final-bill:save', options),
   reportRendererReady: () => invoke('app:renderer-ready')
 }));

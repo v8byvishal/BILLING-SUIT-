@@ -77,6 +77,13 @@
       <pre id="portalAudit" hidden></pre>
     </section>
 
+    <section class="plan-view" id="finalBillView" aria-labelledby="finalBillTitle">
+      <div class="plan-head"><div><h3 id="finalBillTitle">Final bill after manual discharge</h3><p>Local parsing and completed-package storage only. This does not perform discharge or portal upload.</p></div><span id="finalBillStatus">NOT LOADED</span></div>
+      <div class="final-actions"><label><input id="manualDischargeConfirmed" type="checkbox"> I confirm portal verification and discharge were completed manually</label><button class="primary-action" id="loadFinalBill" type="button" disabled>Load final bill</button><button id="resolveFinalMatch" type="button" hidden>Resolve match</button><button class="primary-action" id="saveCompletedBill" type="button" disabled>Save completed bill</button></div>
+      <p id="finalBillMessage">Load an initial bill first.</p>
+      <div class="table-wrap"><table><thead><tr><th>Section</th><th>Item</th><th>Code</th><th>Quantity</th><th>Page</th><th>Status</th></tr></thead><tbody id="finalBillRows"></tbody></table></div>
+    </section>
+
     <section class="future" aria-label="Workflow boundaries">
       <h3>Workflow boundaries</h3>
       <p>Parsing, deterministic planning, and the controlled legacy portal boundary are available. Later workflow modules remain inactive.</p>
