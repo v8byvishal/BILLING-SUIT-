@@ -10,7 +10,7 @@ function loadConfig(options = {}) {
   const configFile = path.resolve(options.configFile || path.join(appDir, 'config', 'default.json'));
   let raw;
   try {
-    raw = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    raw = options.rawConfig || JSON.parse(fs.readFileSync(configFile, 'utf8'));
   } catch (error) {
     throw new Error(`Unable to load configuration from ${configFile}: ${error.message}`);
   }
