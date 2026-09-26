@@ -38,7 +38,7 @@ def validate_request(request):
         quantity = action.get("quantity")
         if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
             raise ValueError("Every action requires a positive integer quantity")
-        if action.get("plan_status") not in ("SOURCE_VERIFIED", "RULE_VERIFIED"):
+        if action.get("plan_status") not in ("SOURCE_VERIFIED", "RULE_VERIFIED", "CUSTOM_VALID"):
             raise ValueError("Bridge refuses non-executable plan status")
 
 
