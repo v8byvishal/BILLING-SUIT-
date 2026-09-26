@@ -15,7 +15,6 @@ const { STORAGE_FOLDERS, StorageService, ensureStorage, resolveStoragePath } = r
 const { createBundledRateRepository, evaluateBill } = require('../services/cghs');
 const { adaptEnhancementPlan } = require('../adapters/legacy-portal/plan-adapter');
 const { LegacyPythonRunner } = require('../adapters/legacy-portal/python-runner');
-const { executeEnhancementPlan } = require('../services/portal/portal-execution-service');
 const { CustomCodeRegistry } = require('../services/custom-codes/custom-code-registry');
 const { createReviewQueue } = require('../services/custom-codes/review-queue');
 const { CaseStore } = require('../services/cases/case-store');
@@ -32,6 +31,10 @@ const { ActiveRegistryStore } = require('../services/cghs/registry');
 const { getDefaultRuleSet, resolveParseResult } = require('../services/cghs/rule-resolution');
 const { EnhancementPlanBuilder, createPlanSummary } = require('../services/cghs/plan-builder');
 const { EnhancementPlanValidator } = require('../services/cghs/plan-validator');
+const { PortalPreflightService } = require('../services/portal/portal-preflight-service');
+const { PortalExecutionGate } = require('../services/portal/portal-execution-gate');
+const { PortalExecutionService } = require('../services/portal/safe-portal-execution-service');
+const { LegacyPortalAdapter } = require('../services/portal/legacy-portal-adapter');
 const { OPERATIONS, registerPhase1Ipc } = require('./phase1-ipc');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
@@ -61,6 +64,12 @@ let activeRegistryState = null;
 let activeRuleSet = null;
 let currentResolutionRun = null;
 let currentDeterministicPlan = null;
+let portalPreflightService = null;
+let portalExecutionGate = null;
+let portalExecutionService = null;
+let portalAdapter = null;
+let currentPortalPreflight = null;
+let currentPortalExecution = null;
 let settingsStore = null;
 let phase1Settings = null;
 const state = createAppState();
@@ -205,6 +214,8 @@ function clearActiveBillWorkspace() {
   currentProductionValidationRun = null;
   currentResolutionRun = null;
   currentDeterministicPlan = null;
+  currentPortalPreflight = null;
+  currentPortalExecution = null;
   currentCaseId = null;
   state.set('IDLE');
   phase1State.resetCurrentBill();
@@ -251,21 +262,37 @@ function buildPlanForBillSession(billSessionId) {
   return plan;
 }
 
+function planValidationContext(billSessionId, plan = null) {
+  const parse = billSessionId && storageService ? storageService.readParseResult(billSessionId) : null;
+  return {
+    parserVersion: parse?.result?.parserVersion || plan?.createdAgainst?.parserVersion || null,
+    registryVersion: activeRegistry()?.registryVersion || plan?.createdAgainst?.registryVersion || null,
+    registrySourceHash: activeRegistry()?.sourceHash || plan?.createdAgainst?.registrySourceHash || null,
+    ruleSetVersion: activeRuleSet?.ruleSetVersion || plan?.createdAgainst?.ruleSetVersion || null,
+    sourceCandidateIds: (parse?.result?.candidates || plan?.diagnostics?.sourceCandidateIds || []).map((candidate) => typeof candidate === 'string' ? candidate : candidate.candidateId).filter(Boolean),
+    sourceExists: billSessionId && storageService ? storageService.getSourceBillRecord(billSessionId, { verifyHash: false }).status === 'SUCCESS' : false,
+    ruleSetContext: activeRuleSet
+  };
+}
+
+function ensurePortalServices() {
+  if (!portalAdapter) portalAdapter = new LegacyPortalAdapter({ runner: new LegacyPythonRunner({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }) });
+  const common = { storageService, ruleSetContext: activeRuleSet, contextProvider: planValidationContext };
+  if (!portalPreflightService) portalPreflightService = new PortalPreflightService({ ...common, portalInspector: portalAdapter });
+  if (!portalExecutionGate) portalExecutionGate = new PortalExecutionGate(common);
+  if (!portalExecutionService) portalExecutionService = new PortalExecutionService({ ...common, preflightService: portalPreflightService, gate: portalExecutionGate, adapter: portalAdapter });
+  return { portalPreflightService, portalExecutionGate, portalExecutionService, portalAdapter };
+}
+
 function validateStoredPlan(billSessionId) {
   if (!billSessionId) return { status: 'NOT_FOUND', error: 'billSessionId is required', billSessionId: null };
   const loaded = storageService.readEnhancementPlan(billSessionId);
   if (loaded.status !== 'SUCCESS') return { status: loaded.status, error: loaded.error || null, billSessionId };
-  const parse = storageService.readParseResult(billSessionId);
   const validator = new EnhancementPlanValidator({ ruleSetContext: activeRuleSet });
   const result = validator.validate(loaded.plan, {
+    ...planValidationContext(billSessionId, loaded.plan),
     billSessionId,
-    sourceBillId: loaded.plan.sourceBillId,
-    parserVersion: parse.result?.parserVersion || loaded.plan.createdAgainst?.parserVersion || null,
-    registryVersion: activeRegistry()?.registryVersion || loaded.plan.createdAgainst?.registryVersion || null,
-    registrySourceHash: activeRegistry()?.sourceHash || loaded.plan.createdAgainst?.registrySourceHash || null,
-    ruleSetVersion: activeRuleSet?.ruleSetVersion || null,
-    sourceCandidateIds: (parse.result?.candidates || []).map((candidate) => candidate.candidateId).filter(Boolean),
-    sourceExists: storageService.getSourceBillRecord(billSessionId, { verifyHash: false }).status === 'SUCCESS'
+    sourceBillId: loaded.plan.sourceBillId
   });
   if (result.stale?.stale) storageService.appendAudit({ billSessionId, operation: 'PLAN_MARKED_STALE', stage: 'ENHANCEMENT_PLAN', status: 'STALE', sourceRef: { planId: loaded.plan.planId, reasons: result.stale.reasons } });
   return { billSessionId, planId: loaded.plan.planId, validation: result };
@@ -476,6 +503,52 @@ function createPhase1Handlers() {
       return { billSessionId, plan, summary: createPlanSummary(plan) };
     },
     [OPERATIONS.ENHANCEMENT_GET_STATUS]: () => phase1State.snapshot().enhancement,
+    [OPERATIONS.PORTAL_PREFLIGHT]: async (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return { status: 'BLOCKED', blockingReasons: [{ code: 'SOURCE_BILL_CHANGED', message: 'No active bill session.' }] };
+      ensurePortalServices();
+      const planResult = storageService.readEnhancementPlan(billSessionId);
+      const plan = planResult.status === 'SUCCESS' ? planResult.plan : null;
+      currentPortalPreflight = await portalPreflightService.preflight({ billSessionId, planId: payload.planId || plan?.planId || null, planSha256: payload.planSha256 || plan?.planSha256 || null });
+      return currentPortalPreflight;
+    },
+    [OPERATIONS.PORTAL_GET_PREFLIGHT]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return null;
+      const loaded = storageService.readPortalPreflightSnapshot(billSessionId, payload.preflightId || 'latest');
+      return loaded.status === 'SUCCESS' ? loaded.snapshot : { status: loaded.status, error: loaded.error || null };
+    },
+    [OPERATIONS.PORTAL_REVALIDATE]: async (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      ensurePortalServices();
+      currentPortalPreflight = await portalPreflightService.preflight({ billSessionId, planId: payload.planId || null, planSha256: payload.planSha256 || null });
+      return currentPortalPreflight;
+    },
+    [OPERATIONS.PORTAL_START_EXECUTION]: async (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) throw new Error('No active bill session for portal execution.');
+      ensurePortalServices();
+      const planResult = storageService.readEnhancementPlan(billSessionId);
+      const plan = planResult.status === 'SUCCESS' ? planResult.plan : null;
+      currentPortalExecution = await portalExecutionService.startExecution({ billSessionId, planId: payload.planId || plan?.planId || null, planSha256: payload.planSha256 || plan?.planSha256 || null, operatorConfirmed: payload.operatorConfirmed === true });
+      phase1State.setPortal({ billSessionId, status: currentPortalExecution.status, diagnostics: currentPortalExecution.diagnostics || [], execution: { runId: currentPortalExecution.runId, summary: currentPortalExecution.summary } });
+      return currentPortalExecution;
+    },
+    [OPERATIONS.PORTAL_GET_EXECUTION]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return null;
+      if (payload.runId) return ensurePortalServices().portalExecutionService.getExecution(billSessionId, payload.runId);
+      return currentPortalExecution;
+    },
+    [OPERATIONS.PORTAL_CANCEL_EXECUTION]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      return ensurePortalServices().portalExecutionService.cancelExecution(billSessionId, payload.runId || currentPortalExecution?.runId);
+    },
+    [OPERATIONS.PORTAL_GET_EXECUTION_SUMMARY]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return null;
+      return ensurePortalServices().portalExecutionService.getExecutionSummary(billSessionId, payload.runId || currentPortalExecution?.runId);
+    },
     [OPERATIONS.FINAL_BILL_GET_STATUS]: () => phase1State.snapshot().finalBill,
     [OPERATIONS.SETTINGS_GET]: () => ({ publicConfig: publicConfig(), settings: phase1Settings, configSchemaVersion: CURRENT_SCHEMA_VERSION }),
     [OPERATIONS.SETTINGS_UPDATE]: (payload = {}) => {
@@ -530,23 +603,14 @@ function registerIpc() {
   });
   ipcMain.handle('custom-codes:audit', (_event, code) => customCodeRegistry.audit(code));
   ipcMain.handle('portal:preview', () => {
-    if (!currentEnhancementPlan) throw new Error('Parse a bill before preparing portal actions');
-    return adaptEnhancementPlan(currentEnhancementPlan, { registrySnapshot: customCodeRegistry.snapshot() });
+    const billSessionId = phase1State.getCurrentBillSessionId();
+    if (!billSessionId) throw new Error('Open a persisted source bill before portal preflight.');
+    const plan = storageService.readEnhancementPlan(billSessionId);
+    if (plan.status !== 'SUCCESS') throw new Error('Build and validate an EnhancementPlan before portal preflight.');
+    return { message: 'Legacy portal preview is disabled in Phase 6. Use cghsSuite.portal.preflight and cghsSuite.portal.startExecution.', planSummary: createPlanSummary(plan.plan) };
   });
-  ipcMain.handle('portal:execute', async (_event, confirmation) => {
-    if (confirmation?.confirmed !== true) throw new Error('EXPLICIT_LIVE_PORTAL_CONFIRMATION_REQUIRED');
-    if (!currentProductionValidationRun || currentProductionValidationRun.overall_status !== 'READY_FOR_PORTAL') throw new Error('Production validation plan review is not complete');
-    if (!currentEnhancementPlan || !currentCaseId) throw new Error('Open a persisted case before portal execution');
-    const manifest = caseStore.load(currentCaseId);
-    if (manifest.workflow_status === 'PLAN_READY') caseWorkflow.markReadyForPortal(currentCaseId);
-    caseWorkflow.beginPortal(currentCaseId);
-    logger.info('Case portal execution started; authenticated Chrome CDP session is required', { caseId: currentCaseId });
-    try {
-      const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner({packaged:app.isPackaged,resourcesPath:process.resourcesPath}), { registrySnapshot: customCodeRegistry.snapshot() });
-      currentExecutionAudit = audit; caseWorkflow.recordPortalResult(currentCaseId, audit);currentProductionValidationRun=productionValidationService.recordPortal(currentProductionValidationRun,audit);
-      logger.info('Case portal execution finished', { caseId: currentCaseId, runId: audit.run_id, status: audit.status, counts: audit.counts });
-      return audit;
-    } catch (error) { caseWorkflow.failPortal(currentCaseId, error); throw error; }
+  ipcMain.handle('portal:execute', async () => {
+    throw new Error('Legacy direct portal execution is disabled in Phase 6. Use controlled portal.startExecution after READY preflight.');
   });
   ipcMain.handle('case:confirm-verification', (_event, operator) => caseWorkflow.confirmVerification(currentCaseId, operator));
   ipcMain.handle('case:confirm-discharge', (_event, operator) => {const result=caseWorkflow.confirmDischarge(currentCaseId, operator);if(currentProductionValidationRun)currentProductionValidationRun=productionValidationService.confirmManualDischarge(currentProductionValidationRun,{operator,confirmed:true});return result;});
@@ -653,6 +717,13 @@ async function bootstrap() {
     const watcherAuditFile=path.join(storageService.getFolderPath('Logs'),'inbox-watcher.jsonl');
     inboxWatcher=new InboxWatcher({scanner:inboxScanner,processCandidate:processInboxCandidate,intervalMs:config.automaticInboxWatch.pollingIntervalMs,maxQueue:config.automaticInboxWatch.maximumQueueSize,concurrency:config.automaticInboxWatch.backgroundConcurrency,audit:event=>fs.appendFileSync(watcherAuditFile,`${JSON.stringify(event)}\n`,{mode:0o600})});
     if(config.automaticInboxWatch.enabled)inboxWatcher.start();
+    ensurePortalServices();
+    const recoveredPortalRuns = [];
+    try {
+      for (const sourceBill of storageService.listSourceBills({ verifyHash: false })) {
+        if (sourceBill.billSessionId) recoveredPortalRuns.push(...storageService.markInterruptedPortalRuns(sourceBill.billSessionId));
+      }
+    } catch (_) { /* interrupted portal run recovery is best effort */ }
     const recoveredCases=caseWorkflow.interruptPortalCases();
     logger.info('Application startup', {
       appDir: APP_DIR,
@@ -664,9 +735,10 @@ async function bootstrap() {
       registryAuthority: activeRegistry()?.authorityStatus || null,
       ruleSetVersion: activeRuleSet.ruleSetVersion,
       recoveredCases: recoveredCases.length,
+      recoveredPortalRuns: recoveredPortalRuns.length,
       storageStatus: storageInfo.status
     });
-    storageService.appendAudit({ operation: 'APPLICATION_STARTUP', stage: 'DESKTOP', status: 'SUCCESS', sourceRef: { recoveredCases, storageStatus: storageInfo.status, registryVersion: activeRegistry()?.registryVersion || null, ruleSetVersion: activeRuleSet.ruleSetVersion } });
+    storageService.appendAudit({ operation: 'APPLICATION_STARTUP', stage: 'DESKTOP', status: 'SUCCESS', sourceRef: { recoveredCases, recoveredPortalRuns: recoveredPortalRuns.length, storageStatus: storageInfo.status, registryVersion: activeRegistry()?.registryVersion || null, ruleSetVersion: activeRuleSet.ruleSetVersion } });
     registerPhase1Ipc(ipcMain, createPhase1Handlers());
     registerIpc();
     createWindow();

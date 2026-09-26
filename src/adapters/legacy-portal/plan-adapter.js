@@ -91,6 +91,7 @@ function adaptEnhancementPlan(plan, options = {}) {
   for (const rejected of plan.rejected_candidates || []) blocked.push(blockedRecord(rejected, rejected.reason || 'REJECTED_BY_RULE'));
   return {
     contract_version: '1.0.0',
+    operation: 'execute_plan_action_batch',
     run_id: options.runId || crypto.randomUUID(),
     requested_at: options.timestamp || new Date().toISOString(),
     plan_version: plan.plan_version,

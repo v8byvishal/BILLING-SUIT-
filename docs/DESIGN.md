@@ -1,12 +1,14 @@
-# Design — Phase 5 EnhancementPlan UI
+# Design — Phase 6 Portal Preflight & Execution Monitor UI
 
 ## Design goal
 
-Phase 5 UI must show the deterministic `EnhancementPlan` as an evidence-gated intermediate artifact without implying downstream portal execution. Operators should see which rows became validated actions, which require review, which were excluded, and why.
+Phase 6 UI must show the deterministic `EnhancementPlan`, backend-owned portal readiness, and real portal execution progress without implying that renderer state can authorize portal mutation.
 
-## Registry and plan status
+Portal execution is not automatic. The operator must run backend preflight and explicitly choose `START ENHANCEMENT`.
 
-Settings and the status strip display registry status. The Enhancement workspace displays plan status and readiness.
+## Registry, plan, and portal status
+
+Settings and the status strip display registry status. The Enhancement workspace displays plan status/readiness plus portal preflight/execution status.
 
 Plan header values:
 
@@ -17,19 +19,75 @@ Plan header values:
 - rule-set version;
 - readiness.
 
-No counts are invented. Values come from persisted plan/summary data and controlled IPC calls.
+Portal header values:
+
+- backend preflight status;
+- persisted run id;
+- execution run state;
+- progress counts from persisted execution summary.
+
+No counts are invented. Values come from persisted plan/preflight/run/summary data and controlled IPC calls.
 
 ## Enhancement workspace
 
-The Enhancement workspace is now a plan viewer, not a portal execution console.
+The Enhancement workspace is both a plan viewer and a controlled portal safety monitor.
 
 Sections:
 
 1. Header: version, id, hash, registry/rule context, readiness.
-2. Actions: evidence-gated validated plan actions.
-3. Review Required: unresolved/uncertain/conflicting/missing evidence.
-4. Excluded: Patient Payable, non-domain, unsupported, rejected, and duplicate evidence.
-5. Diagnostics: plan diagnostics and validation summary.
+2. Portal Readiness: backend preflight buttons, start/cancel controls, check table, execution action table.
+3. Actions: evidence-gated validated plan actions.
+4. Review Required: unresolved/uncertain/conflicting/missing evidence.
+5. Excluded: Patient Payable, non-domain, unsupported, rejected, and duplicate evidence.
+6. Diagnostics: plan, validation, portal preflight, and execution summary references.
+
+## Portal readiness panel
+
+Controls:
+
+- `Run preflight` calls `portal.preflight`.
+- `Start enhancement` is enabled only when backend preflight is `READY` and validated actions exist.
+- `Cancel execution` calls `portal.cancelExecution`.
+
+The `Start enhancement` button displays an explicit confirmation dialog before invoking `portal.startExecution({ operatorConfirmed: true })`.
+
+## Preflight checks table
+
+Columns:
+
+- Check
+- Status
+- Severity
+- Message
+
+Examples:
+
+- `PLAN_HASH`
+- `PLAN_NOT_STALE`
+- `SOURCE_BILL`
+- `CDP_ENDPOINT`
+- `PORTAL_IDENTITY`
+- `AUTHENTICATION`
+- `PORTAL_CONTROLS`
+- `PORTAL_BILL_CONTEXT`
+
+A blocked check must be visible as text, not only color.
+
+## Portal execution table
+
+Columns:
+
+- Order
+- Action
+- Code
+- Desired Qty
+- Existing Qty
+- State
+- Verification
+- Error
+- Duration
+
+States shown are backend action states such as `SEARCHING`, `MATCHED`, `QUANTITY_CHECK`, `APPLYING`, `VERIFYING`, `SUCCESS`, `DUPLICATE`, `FAILED`, or `CANCELLED`.
 
 ## Actions table
 
@@ -43,7 +101,7 @@ Columns:
 - Authority
 - Provenance
 
-Action rows are data-only. They are not buttons, scripts, or portal commands.
+Action rows are data-only. They are not buttons, scripts, selectors, or portal commands.
 
 ## Review-required table
 
@@ -56,7 +114,7 @@ Columns:
 - Status
 - Required evidence
 
-Review-required rows should answer:
+Review-required rows must never execute. They should answer:
 
 1. What was found?
 2. Why was it not promoted to action?
@@ -96,13 +154,13 @@ Parser candidates remain evidence. They are not automatically business-validated
 
 ## Privacy
 
-Source PDFs may contain patient-sensitive information. The UI should show necessary candidate/resolution/plan evidence only and must not dump complete PDF text into generic diagnostics or audit views.
+Source PDFs, portal pages, screenshots, and DOM captures may contain patient-sensitive information. The UI should show necessary candidate/resolution/plan/preflight/run evidence only and must not dump complete PDF text, screenshots, DOM, cookies, tokens, credentials, or browser profile paths into generic diagnostics or audit views.
 
 ## Status colors
 
-- Success/validated: `ACTIVE`, `READY`, `COMPLETED`, `VALIDATED`, `VALIDATED_MAPPING`, `DIRECT_REGISTRY_MATCH`, `READY_FOR_PORTAL_VALIDATION`.
-- Warning/review: `PARTIAL`, `NOT CONFIGURED`, `VALIDATED_WITH_REVIEW`, `REVIEW_REQUIRED`, `UNRESOLVED_MAPPING`, `NO_MATCH`, `NOT VERIFIED`, `STALE`.
-- Error/conflict: `INVALID`, `FAILED`, `BLOCKED`, `RULE_CONFLICT`, `REJECTED`, `CORRUPT`, `ACCESS_ERROR`.
+- Success/validated: `ACTIVE`, `READY`, `COMPLETED`, `SUCCESS`, `DUPLICATE`, `VALIDATED`, `VALIDATED_MAPPING`, `DIRECT_REGISTRY_MATCH`, `READY_FOR_PORTAL_VALIDATION`.
+- Warning/review: `PARTIAL`, `NOT CONFIGURED`, `VALIDATED_WITH_REVIEW`, `REVIEW_REQUIRED`, `UNRESOLVED_MAPPING`, `NO_MATCH`, `NOT VERIFIED`, `NOT STARTED`, `STALE`, `CANCELLED`, `COMPLETED_WITH_FAILURES`.
+- Error/conflict: `INVALID`, `FAILED`, `BLOCKED`, `RULE_CONFLICT`, `REJECTED`, `CORRUPT`, `ACCESS_ERROR`, `UNAVAILABLE`.
 
 Every status is written as text; color is secondary.
 
@@ -112,5 +170,14 @@ Every status is written as text; color is secondary.
 - Registry status access is controlled through `registry.getStatus`.
 - Resolution access is controlled through `resolution.getResult` and `resolution.getStatus`.
 - Plan access is controlled through `enhancement.buildPlan`, `enhancement.getPlan`, `enhancement.getPlanSummary`, `enhancement.validatePlan`, and `enhancement.rebuildPlan`.
-- There is no generic command execution, shell execution, Python execution, JavaScript eval, arbitrary filesystem browsing, unrestricted PDF access, credential handling, Selenium/CDP action, or final PDF generation.
-- Plan rows must not expose a “Run”, “Execute”, “Login”, “Discharge”, or “Click portal” action in Phase 5.
+- Portal access is controlled through `portal.preflight`, `portal.getPreflight`, `portal.revalidate`, `portal.startExecution`, `portal.getExecution`, `portal.getExecutionSummary`, and `portal.cancelExecution`.
+- There is no generic command execution, shell execution, Python execution, JavaScript eval, arbitrary filesystem browsing, unrestricted PDF access, credential handling, raw Selenium/CDP action, discharge automation, or final PDF generation.
+- Plan rows must not expose raw “Run”, “Login”, “Discharge”, or “Click portal” operations.
+
+## Live portal status
+
+No approved authenticated live portal run was performed in this phase.
+
+```text
+LIVE_PORTAL: NOT VERIFIED
+```

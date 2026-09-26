@@ -1,6 +1,6 @@
-# Architecture — Phase 5 EnhancementPlan Boundary
+# Architecture — Phase 6 Portal Safety Boundary
 
-CGHS Billing & Enhancement Suite V2 remains a local vanilla Electron/JavaScript desktop application. Phase 5 adds a deterministic `EnhancementPlan` layer after Phase 4 registry/rule resolution.
+CGHS Billing & Enhancement Suite V2 remains a local vanilla Electron/JavaScript desktop application. Phase 6 adds an independent backend portal preflight and safe execution gate after the deterministic Phase 5 `EnhancementPlan` layer.
 
 ## Boundary diagram
 
@@ -20,11 +20,21 @@ CGHS registry + deterministic resolver
 EnhancementPlanBuilder
   ↓ plan.json + plan-summary.json
 EnhancementPlanValidator
-  ↓ pass/warn/fail validation result
-Later phases only: portal validation and final-bill generation
+  ↓ current/stale/hash/source validation
+PortalExecutionGate
+  ↓ explicit START ENHANCEMENT + READY preflight
+PortalPreflightService
+  ↓ independent CDP/portal/auth/control/context checks
+PortalExecutionService
+  ↓ state machine, persistence, retry/cancel/recovery
+PortalAdapter
+  ↓ narrow allowlisted JSON bridge
+Existing Python bridge / Selenium / CDP implementation
+  ↓ observed portal mutation + verification
+Persisted portal run + summary
 ```
 
-Renderer code must not access arbitrary filesystem APIs, child processes, Python, Selenium, registry files, source PDF bytes, Storage folder manipulation, CGHS rule internals, or plan files directly.
+Renderer code must not access arbitrary filesystem APIs, child processes, Python, Selenium, registry files, source PDF bytes, Storage folder manipulation, CGHS rule internals, plan files directly, raw CDP operations, raw portal selectors, or shell operations.
 
 ## Source lifecycle
 
@@ -37,7 +47,10 @@ Renderer code must not access arbitrary filesystem APIs, child processes, Python
 7. Resolver writes `resolution-result.json` next to the parser result.
 8. Plan builder consumes parser + resolution output and writes `enhancement/plan.json` plus `enhancement/plan-summary.json`.
 9. Plan validator independently validates persisted/current plan context.
-10. UI shows plan header, actions, review-required rows, excluded rows, and diagnostics.
+10. Portal preflight checks backend-owned plan/source/CDP/portal readiness and writes immutable preflight snapshots.
+11. Operator explicitly starts enhancement execution.
+12. Execution service revalidates plan/preflight and persists run JSON/summary.
+13. UI shows plan header, backend preflight checks, portal execution progress, actions, review-required rows, excluded rows, and diagnostics.
 
 ## Storage paths
 
@@ -48,6 +61,10 @@ Storage/Source_Bills/<billSessionId>/parse-result.json
 Storage/Source_Bills/<billSessionId>/resolution-result.json
 Storage/Source_Bills/<billSessionId>/enhancement/plan.json
 Storage/Source_Bills/<billSessionId>/enhancement/plan-summary.json
+Storage/Source_Bills/<billSessionId>/execution/<preflightId>.preflight.json
+Storage/Source_Bills/<billSessionId>/execution/latest.preflight.json
+Storage/Source_Bills/<billSessionId>/execution/<runId>.json
+Storage/Source_Bills/<billSessionId>/execution/<runId>-summary.json
 ```
 
 Runtime Storage data belongs outside the Electron installation directory and must not be committed.
@@ -64,34 +81,24 @@ The resolver is conservative: unresolved, unverified, ambiguous, stale/date-unkn
 
 ## Plan builder service
 
-`src/services/cghs/plan-builder.js` owns:
+`src/services/cghs/plan-builder.js` owns deterministic Phase 5 plan construction, action gating, review-item construction, excluded-item construction, deterministic aggregation, quantity derivation provenance, plan hash/id calculation, and plan summary creation.
 
-- `PLAN_VERSION = "5.0.0"` via validator constants;
-- deterministic plan construction;
-- action gating;
-- review-item construction;
-- excluded-item construction;
-- deterministic aggregation;
-- quantity derivation provenance;
-- plan hash/id calculation;
-- plan summary creation.
-
-The builder does not redo registry resolution, does not repair invalid resolver output, and does not infer semantic code mappings.
+The builder does not redo registry resolution, repair invalid resolver output, infer semantic code mappings, or create portal commands.
 
 ## Plan validator service
 
-`src/services/cghs/plan-validator.js` owns:
+`src/services/cghs/plan-validator.js` owns schema/type validation, status/readiness validation, registry/rule context validation, action/review/exclusion validation, quantity/unit validation, source-candidate membership, stale-context detection, security field scans, and canonical hash verification.
 
-- schema/type validation;
-- status/readiness validation;
-- registry/rule context validation;
-- action/review/exclusion validation;
-- quantity/unit validation;
-- source-candidate membership and no-silent-discard checks;
-- aggregation checks;
-- security field scans;
-- stale-context detection;
-- canonical hash verification.
+## Portal services
+
+Phase 6 portal code lives in `src/services/portal/`:
+
+- `portal-contract.js` — constants for action/run states, failure codes, audit events, and final-code pattern.
+- `cdp-health-check.js` — independent `/json/list` CDP health and target discovery.
+- `portal-preflight-service.js` — fail-closed plan/source/CDP/portal/auth/control/context readiness checks.
+- `portal-execution-gate.js` — persisted-plan execution gate requiring explicit operator start.
+- `safe-portal-execution-service.js` — execution state machine, persistence, duplicate/quantity/retry/cancel/recovery handling.
+- `legacy-portal-adapter.js` — narrow Phase 6 bridge to existing Python/Selenium implementation.
 
 ## UI / IPC additions
 
@@ -105,27 +112,47 @@ Controlled IPC/preload operations:
 - `enhancement.getPlanSummary(billSessionId)`
 - `enhancement.validatePlan(billSessionId)`
 - `enhancement.rebuildPlan(billSessionId)`
+- `portal.preflight(input)`
+- `portal.getPreflight(input)`
+- `portal.revalidate(input)`
+- `portal.startExecution(input)`
+- `portal.getExecution(input)`
+- `portal.getExecutionSummary(input)`
+- `portal.cancelExecution(input)`
 
 UI additions:
 
 - Registry status in Settings/status strip.
 - Resolution summary in persisted Source Bills list.
 - EnhancementPlan header with version/id/hash/readiness.
+- Backend Portal Readiness panel with preflight checks.
+- Portal Execution monitor with persisted progress/action states.
 - Actions, Review Required, Excluded, and Diagnostics tables.
 
-Plan rows are data-only and are not portal-executable commands.
+Plan rows are data-only. Portal execution derives internal actions only from persisted validated plan actions.
 
 ## Official data status
 
 No approved official CGHS master/rate source exists in this checkout. The bundled HFOS snapshot is machine-readable but unverified. It can provide traceability and candidate review, not direct production authority.
+
+## Live portal status
+
+No approved authenticated non-PHI live portal environment was available in this session.
+
+```text
+LIVE_PORTAL: NOT VERIFIED
+```
 
 ## Security
 
 - Registry, rule, and plan fields are data only.
 - No JavaScript evaluation from registry/rule/plan files.
 - No shell execution.
-- No external API lookup during normal resolution/plan building.
+- No arbitrary Python operation exposure.
+- No raw CDP operation exposure.
 - No source PDF full-text dump into audit.
-- No portal automation call from Phase 5.
-- No credential entry/storage in plan or UI.
-- No final PDF generation in Phase 5.
+- No renderer-provided action list/selector/code/quantity can authorize execution.
+- No credential entry/storage/automation.
+- No cookies/tokens/browser profiles persisted.
+- No discharge automation.
+- No final PDF generation in Phase 6.

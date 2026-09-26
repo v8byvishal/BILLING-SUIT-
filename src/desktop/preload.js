@@ -56,6 +56,15 @@ const api = Object.freeze({
     rebuildPlan: (billSessionId) => call(OPERATIONS.ENHANCEMENT_REBUILD_PLAN, { billSessionId }),
     getStatus: () => call(OPERATIONS.ENHANCEMENT_GET_STATUS)
   }),
+  portal: Object.freeze({
+    preflight: (input) => call(OPERATIONS.PORTAL_PREFLIGHT, input),
+    getPreflight: (input) => call(OPERATIONS.PORTAL_GET_PREFLIGHT, input),
+    startExecution: (input) => call(OPERATIONS.PORTAL_START_EXECUTION, input),
+    getExecution: (input) => call(OPERATIONS.PORTAL_GET_EXECUTION, input),
+    cancelExecution: (input) => call(OPERATIONS.PORTAL_CANCEL_EXECUTION, input),
+    getExecutionSummary: (input) => call(OPERATIONS.PORTAL_GET_EXECUTION_SUMMARY, input),
+    revalidate: (input) => call(OPERATIONS.PORTAL_REVALIDATE, input)
+  }),
   finalBill: Object.freeze({
     getStatus: () => call(OPERATIONS.FINAL_BILL_GET_STATUS)
   }),
@@ -105,8 +114,8 @@ contextBridge.exposeInMainWorld('vnext', Object.freeze({
   updateCustomCode: (code, input) => legacyInvoke('custom-codes:update', code, input),
   setCustomCodeActive: (code, active, context) => legacyInvoke('custom-codes:set-active', code, active, context),
   getCustomCodeAudit: (code) => legacyInvoke('custom-codes:audit', code),
-  previewPortalActions: () => legacyInvoke('portal:preview'),
-  executePortalActions: (confirmation) => legacyInvoke('portal:execute', confirmation),
+  previewPortalActions: () => api.portal.getPreflight({}),
+  executePortalActions: (confirmation) => api.portal.startExecution({ operatorConfirmed: confirmation?.confirmed === true }),
   selectAndParseFinalBill: () => legacyInvoke('final-bill:select-and-parse'),
   resolveFinalBillMatch: (decision) => legacyInvoke('final-bill:resolve-match', decision),
   saveCompletedBill: (options) => legacyInvoke('final-bill:save', options),

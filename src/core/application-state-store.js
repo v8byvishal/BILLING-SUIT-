@@ -139,6 +139,12 @@ class ApplicationStateStore {
     return this.snapshot();
   }
 
+  setPortal({ billSessionId = this.state.currentBill.billSessionId, status, preflight = null, execution = null, diagnostics = [] }) {
+    if (billSessionId) this.assertBillSession(billSessionId);
+    this.state.portal = { billSessionId: billSessionId || null, status, preflight: clone(preflight), execution: clone(execution), diagnostics: clone(diagnostics), updated_at: this.now() };
+    return this.snapshot();
+  }
+
   resetTransientUIState() {
     this.state.transientUI = { busy: false, route: this.state.transientUI.route || 'dashboard', lastMessage: null, updated_at: this.now() };
     return this.snapshot();

@@ -146,6 +146,31 @@
           </dl>
           <p id="noPlanMessage" class="empty-text">No EnhancementPlan has been generated for the current bill.</p>
 
+          <h3>Portal Readiness</h3>
+          <div class="actions">
+            <button id="runPortalPreflight" type="button">Run preflight</button>
+            <button class="primary" id="startPortalExecution" type="button" disabled>Start enhancement</button>
+            <button id="cancelPortalExecution" type="button">Cancel execution</button>
+          </div>
+          <dl class="details">
+            <div><dt>Preflight</dt><dd id="portalPreflightStatus">NOT CHECKED</dd></div>
+            <div><dt>Run ID</dt><dd id="portalRunId">—</dd></div>
+            <div><dt>Execution</dt><dd id="portalExecutionStatus">NOT STARTED</dd></div>
+            <div><dt>Progress</dt><dd id="portalExecutionProgress">—</dd></div>
+          </dl>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Check</th><th>Status</th><th>Severity</th><th>Message</th></tr></thead>
+              <tbody id="portalPreflightRows"></tbody>
+            </table>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Order</th><th>Action</th><th>Code</th><th>Desired Qty</th><th>Existing Qty</th><th>State</th><th>Verification</th><th>Error</th><th>Duration</th></tr></thead>
+              <tbody id="portalExecutionRows"></tbody>
+            </table>
+          </div>
+
           <h3>Actions</h3>
           <div class="table-wrap" id="actionTableWrap">
             <table>

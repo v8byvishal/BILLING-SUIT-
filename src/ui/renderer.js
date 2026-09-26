@@ -13,6 +13,8 @@ const ui = {
   enhancementPlan: null,
   planSummary: null,
   planValidation: null,
+  portalPreflight: null,
+  portalExecution: null,
   registryStatus: null
 };
 
@@ -188,7 +190,7 @@ function renderPlan() {
   const billSessionId = activeState().currentBill?.billSessionId;
   text('enhancementState', plan?.status || 'No plan');
   text('enhancementBill', billSessionId ? `Active bill session: ${billSessionId}` : 'No source bill is active.');
-  text('executionStatus', plan ? `${plan.readiness || 'NOT_READY'} · portal execution is not implemented in Phase 5.` : 'No validated plan available.');
+  text('executionStatus', plan ? `${plan.readiness || 'NOT_READY'} · portal execution requires independent Phase 6 preflight and explicit operator start.` : 'No validated plan available.');
   text('planVersion', plan ? `${plan.planVersion || '—'} · schema ${plan.schemaVersion || '—'}` : '—');
   text('planId', plan?.planId || '—');
   text('planHash', plan?.planSha256 || '—');
@@ -224,6 +226,32 @@ function renderPlan() {
     (item) => item.candidateId
   ], 'No excluded parser candidates.');
 
+  const preflight = ui.portalPreflight;
+  const execution = ui.portalExecution;
+  text('portalPreflightStatus', preflight?.status || 'NOT CHECKED');
+  text('portalRunId', execution?.runId || '—');
+  text('portalExecutionStatus', execution?.status || 'NOT STARTED');
+  text('portalExecutionProgress', execution?.summary ? `${execution.summary.success || 0} success · ${execution.summary.duplicate || 0} duplicate · ${execution.summary.failed || 0} failed · ${execution.summary.cancelled || 0} cancelled · ${execution.summary.skipped || 0} skipped` : '—');
+  const startButton = $('startPortalExecution');
+  if (startButton) startButton.disabled = !(preflight?.status === 'READY' && plan?.actions?.length);
+  setRows('portalPreflightRows', preflight?.checks || [], [
+    (item) => item.name,
+    (item) => item.status,
+    (item) => item.severity,
+    (item) => item.message
+  ], 'Portal preflight has not run.');
+  setRows('portalExecutionRows', execution?.actions || [], [
+    (item) => item.executionOrder,
+    (item) => item.actionId,
+    (item) => item.code,
+    (item) => item.quantity,
+    (item) => item.existingQuantity,
+    (item) => item.state,
+    (item) => item.verificationStatus,
+    (item) => item.errorCode,
+    (item) => item.durationMs ? `${item.durationMs} ms` : '—'
+  ], 'No portal execution run has started.');
+
   const diagnostics = plan ? {
     planId: plan.planId,
     planSha256: plan.planSha256,
@@ -232,6 +260,8 @@ function renderPlan() {
     diagnostics: plan.diagnostics,
     validation: ui.planValidation || plan.validation || null,
     summary: ui.planSummary || null,
+    preflight: ui.portalPreflight ? { preflightId: ui.portalPreflight.preflightId, status: ui.portalPreflight.status, blockingReasons: ui.portalPreflight.blockingReasons } : null,
+    execution: ui.portalExecution ? { runId: ui.portalExecution.runId, status: ui.portalExecution.status, summary: ui.portalExecution.summary } : null,
     resolutionCounts: ui.resolutionResult?.counts || null
   } : { registry: ui.registryStatus || null, resolution: ui.resolutionResult ? { status: ui.resolutionResult.status, counts: ui.resolutionResult.counts } : null };
   text('enhancementDiagnostics', JSON.stringify(diagnostics, null, 2));
@@ -323,6 +353,8 @@ async function refreshState() {
     const planPayload = billSessionId ? await suite().enhancement.getPlan(billSessionId).catch(() => null) : null;
     ui.enhancementPlan = planPayload?.plan || null;
     ui.planSummary = billSessionId ? await suite().enhancement.getPlanSummary(billSessionId).catch(() => null) : null;
+    ui.portalPreflight = billSessionId ? await suite().portal.getPreflight({ billSessionId }).catch(() => null) : null;
+    ui.portalExecution = billSessionId ? await suite().portal.getExecution({ billSessionId }).catch(() => null) : null;
     renderAll();
   } catch (error) {
     showBanner(safeMessage(error), 'error');
@@ -384,6 +416,39 @@ async function validatePlan() {
   } catch (error) { showBanner(safeMessage(error), 'error'); }
 }
 
+async function runPortalPreflight() {
+  const billSessionId = activeState().currentBill?.billSessionId;
+  if (!billSessionId || !ui.enhancementPlan) { showBanner('Build a validated EnhancementPlan before portal preflight.', 'warning'); return; }
+  try {
+    ui.portalPreflight = await suite().portal.preflight({ billSessionId, planId: ui.enhancementPlan.planId, planSha256: ui.enhancementPlan.planSha256 });
+    showBanner(`Portal preflight ${ui.portalPreflight.status}.`, ui.portalPreflight.status === 'READY' ? 'success' : 'warning');
+    await refreshState();
+  } catch (error) { showBanner(safeMessage(error), 'error'); }
+}
+
+async function startPortalExecution() {
+  const billSessionId = activeState().currentBill?.billSessionId;
+  if (!billSessionId || !ui.enhancementPlan) { showBanner('Build a validated EnhancementPlan before portal execution.', 'warning'); return; }
+  const actionCount = ui.enhancementPlan.actions?.length || 0;
+  const reviewCount = ui.enhancementPlan.reviewItems?.length || 0;
+  const ok = window.confirm(`START ENHANCEMENT?\n\nBill/session: ${billSessionId}\nValidated actions: ${actionCount}\nReview items not executed: ${reviewCount}\nTarget portal: authenticated browser session detected by backend preflight only.\n\nProceed?`);
+  if (!ok) return;
+  try {
+    ui.portalExecution = await suite().portal.startExecution({ billSessionId, planId: ui.enhancementPlan.planId, planSha256: ui.enhancementPlan.planSha256, preflightId: ui.portalPreflight?.preflightId || null, operatorConfirmed: true });
+    showBanner(`Portal execution ${ui.portalExecution.status}. Human verification remains mandatory.`, ui.portalExecution.status === 'COMPLETED' ? 'success' : 'warning');
+    await refreshState();
+  } catch (error) { showBanner(safeMessage(error), 'error'); }
+}
+
+async function cancelPortalExecution() {
+  const billSessionId = activeState().currentBill?.billSessionId;
+  try {
+    const result = await suite().portal.cancelExecution({ billSessionId, runId: ui.portalExecution?.runId || null });
+    showBanner(`Portal cancellation requested: ${result?.status || 'UNKNOWN'}.`, 'warning');
+    await refreshState();
+  } catch (error) { showBanner(safeMessage(error), 'error'); }
+}
+
 async function collectDiagnostics() {
   try {
     ui.diagnostics = await suite().app.getDiagnostics();
@@ -426,6 +491,9 @@ function bind() {
   $('buildEnhancementPlan').addEventListener('click', () => buildPlan(false));
   $('validateEnhancementPlan').addEventListener('click', validatePlan);
   $('rebuildEnhancementPlan').addEventListener('click', () => buildPlan(true));
+  $('runPortalPreflight').addEventListener('click', runPortalPreflight);
+  $('startPortalExecution').addEventListener('click', startPortalExecution);
+  $('cancelPortalExecution').addEventListener('click', cancelPortalExecution);
   $('openFinalFolder').addEventListener('click', () => suite().storage.openFolder('Final_Bills').catch((error) => showBanner(safeMessage(error), 'error')));
   $('openAuditFolder').addEventListener('click', () => suite().storage.openFolder('Audit').catch((error) => showBanner(safeMessage(error), 'error')));
   $('openFailuresFolder').addEventListener('click', () => suite().storage.openFolder('Failures').catch((error) => showBanner(safeMessage(error), 'error')));

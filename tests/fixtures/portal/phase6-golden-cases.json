@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "fixtureName": "Phase 6 mock portal preflight and execution golden cases",
+  "notes": "Synthetic non-PHI portal fixtures only. They exercise the safe execution state machine without a live CGHS portal.",
+  "cases": [
+    { "id": "portal-01", "name": "single successful action", "expected": { "preflight": "READY", "execution": "COMPLETED", "actions": ["SUCCESS"] } },
+    { "id": "portal-02", "name": "multiple successful actions", "expected": { "preflight": "READY", "execution": "COMPLETED", "success": 2 } },
+    { "id": "portal-03", "name": "duplicate action", "expected": { "action": "DUPLICATE", "duplicate": 1 } },
+    { "id": "portal-04", "name": "mixed success failure", "expected": { "execution": "COMPLETED_WITH_FAILURES" } },
+    { "id": "portal-05", "name": "locked quantity", "expected": { "failureCode": "QUANTITY_LOCKED" } },
+    { "id": "portal-06", "name": "ambiguous result", "expected": { "failureCode": "AMBIGUOUS_MATCH" } },
+    { "id": "portal-07", "name": "verification failure", "expected": { "failureCode": "VERIFICATION_FAILED" } },
+    { "id": "portal-08", "name": "cancellation", "expected": { "execution": "CANCELLED" } },
+    { "id": "portal-09", "name": "stale plan", "expected": { "preflight": "BLOCKED", "failureCode": "PLAN_STALE" } },
+    { "id": "portal-10", "name": "authentication failure", "expected": { "preflight": "BLOCKED", "failureCode": "AUTHENTICATION_UNVERIFIED" } }
+  ]
+}

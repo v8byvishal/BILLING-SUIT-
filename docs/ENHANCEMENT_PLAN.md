@@ -1,6 +1,6 @@
 # EnhancementPlan Contract
 
-`EnhancementPlan` is the Phase 5 trusted intermediate artifact between Phase 4 resolution and any later portal-validation/final-bill phases.
+`EnhancementPlan` is the Phase 5 trusted intermediate artifact between Phase 4 resolution and Phase 6 portal preflight/execution safety checks. It remains separate from final-bill phases.
 
 It answers only this question:
 
@@ -177,7 +177,13 @@ Storage/Source_Bills/<billSessionId>/enhancement/plan.json
 Storage/Source_Bills/<billSessionId>/enhancement/plan-summary.json
 ```
 
-The plan and summary are external runtime data and must not be committed as operational patient data.
+Phase 6 portal artifacts derived from this plan are stored separately under:
+
+```text
+Storage/Source_Bills/<billSessionId>/execution/
+```
+
+The plan, summary, preflight snapshots, execution runs, and execution summaries are external runtime data and must not be committed as operational patient data.
 
 ## Security boundary
 
@@ -194,4 +200,4 @@ The plan must not contain:
 - arbitrary portal commands;
 - final PDF bytes or output handles.
 
-Downstream phases must treat `EnhancementPlan` as validated data, not as code.
+Phase 6 treats `EnhancementPlan` as validated persisted data, not as code. Portal execution reloads the stored plan, recalculates its canonical hash, checks source/registry/rule currentness, derives narrow internal actions from validated `finalCode` fields, and ignores renderer-provided action fields.

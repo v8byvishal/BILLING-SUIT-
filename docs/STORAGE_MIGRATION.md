@@ -49,6 +49,17 @@ Storage/Audit/audit-YYYY-MM-DD.jsonl
 Storage/Failures/<failureId>.json
 ```
 
+Phase 6 portal execution adds runtime files under each source bill:
+
+```text
+Storage/Source_Bills/<billSessionId>/execution/<preflightId>.preflight.json
+Storage/Source_Bills/<billSessionId>/execution/latest.preflight.json
+Storage/Source_Bills/<billSessionId>/execution/<runId>.json
+Storage/Source_Bills/<billSessionId>/execution/<runId>-summary.json
+```
+
+These files are external runtime artifacts. They may contain operational patient/bill context and must not be committed.
+
 ## Migration behavior
 
 On startup, `StorageService.initialize()`:

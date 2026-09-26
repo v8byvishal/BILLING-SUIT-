@@ -511,6 +511,10 @@ class StorageService {
         if (fs.existsSync(plan)) files.push(plan);
         const summary = path.join(sourceRoot, id, 'enhancement', 'plan-summary.json');
         if (fs.existsSync(summary)) files.push(summary);
+        const execution = path.join(sourceRoot, id, 'execution');
+        if (fs.existsSync(execution)) {
+          for (const name of fs.readdirSync(execution)) if (name.endsWith('.json')) files.push(path.join(execution, name));
+        }
       }
     }
     const activeRegistry = path.join(this.assertRoot(), 'CGHS', 'active-registry.json');
@@ -714,6 +718,85 @@ class StorageService {
     const loaded = this.readJson(this.getEnhancementPlanSummaryPath(billSessionId), { fallback: null, preserveCorrupt: true });
     if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
     return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, summary: loaded.value };
+  }
+
+  getPortalExecutionDirectory(billSessionId) {
+    return path.join(this.getSourceBillDirectory(billSessionId), 'execution');
+  }
+
+  getPortalPreflightPath(billSessionId, preflightId = 'latest') {
+    return path.join(this.getPortalExecutionDirectory(billSessionId), `${safeName(preflightId)}.preflight.json`);
+  }
+
+  getPortalExecutionRunPath(billSessionId, runId) {
+    return path.join(this.getPortalExecutionDirectory(billSessionId), `${safeName(runId)}.json`);
+  }
+
+  getPortalExecutionSummaryPath(billSessionId, runId) {
+    return path.join(this.getPortalExecutionDirectory(billSessionId), `${safeName(runId)}-summary.json`);
+  }
+
+  writePortalPreflightSnapshot(billSessionId, snapshot) {
+    const directory = this.getPortalExecutionDirectory(billSessionId);
+    fs.mkdirSync(directory, { recursive: true });
+    const preflightId = snapshot.preflightId || `preflight-${this.idFactory()}`;
+    const snapshotWithId = { ...snapshot, preflightId };
+    const pathForId = this.getPortalPreflightPath(billSessionId, preflightId);
+    const latestPath = this.getPortalPreflightPath(billSessionId, 'latest');
+    this.writeJson(pathForId, snapshotWithId);
+    this.writeJson(latestPath, snapshotWithId);
+    return { status: OPERATION_STATUS.SUCCESS, path: pathForId, latestPath, snapshot: snapshotWithId };
+  }
+
+  readPortalPreflightSnapshot(billSessionId, preflightId = 'latest') {
+    const loaded = this.readJson(this.getPortalPreflightPath(billSessionId, preflightId || 'latest'), { fallback: null, preserveCorrupt: true });
+    if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
+    return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, snapshot: loaded.value };
+  }
+
+  writePortalExecutionRun(billSessionId, run, summary = null) {
+    const directory = this.getPortalExecutionDirectory(billSessionId);
+    fs.mkdirSync(directory, { recursive: true });
+    const runPath = this.getPortalExecutionRunPath(billSessionId, run.runId);
+    const summaryPath = this.getPortalExecutionSummaryPath(billSessionId, run.runId);
+    this.writeJson(runPath, run);
+    if (summary) this.writeJson(summaryPath, summary);
+    return { status: OPERATION_STATUS.SUCCESS, path: runPath, summaryPath, run, summary };
+  }
+
+  readPortalExecutionRun(billSessionId, runId) {
+    const loaded = this.readJson(this.getPortalExecutionRunPath(billSessionId, runId), { fallback: null, preserveCorrupt: true });
+    if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
+    return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, run: loaded.value };
+  }
+
+  readPortalExecutionSummary(billSessionId, runId) {
+    const loaded = this.readJson(this.getPortalExecutionSummaryPath(billSessionId, runId), { fallback: null, preserveCorrupt: true });
+    if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
+    return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, summary: loaded.value };
+  }
+
+  listPortalExecutionRuns(billSessionId) {
+    const directory = this.getPortalExecutionDirectory(billSessionId);
+    if (!fs.existsSync(directory)) return [];
+    return fs.readdirSync(directory)
+      .filter((name) => name.endsWith('.json') && !name.endsWith('-summary.json') && !name.endsWith('.preflight.json'))
+      .map((name) => this.readJson(path.join(directory, name), { fallback: null, preserveCorrupt: true }))
+      .map((entry) => entry.status === OPERATION_STATUS.SUCCESS ? entry.value : { status: OPERATION_STATUS.CORRUPT, path: entry.path, error: entry.error })
+      .sort((a, b) => String(b.startedAt || b.timestamp || '').localeCompare(String(a.startedAt || a.timestamp || '')));
+  }
+
+  markInterruptedPortalRuns(billSessionId) {
+    const activeStates = new Set(['PREFLIGHT', 'READY', 'RUNNING', 'PAUSED', 'CANCELLING']);
+    const updated = [];
+    for (const run of this.listPortalExecutionRuns(billSessionId)) {
+      if (run?.runId && activeStates.has(run.status)) {
+        const next = { ...run, status: 'INTERRUPTED', completedAt: run.completedAt || this.now(), interruptedAt: this.now(), requiresReview: true, diagnostics: [...(run.diagnostics || []), { code: 'RUN_INTERRUPTED_ON_STARTUP', message: 'Run was not terminal at startup and requires explicit operator review.' }] };
+        this.writePortalExecutionRun(billSessionId, next, next.summary || null);
+        updated.push(next);
+      }
+    }
+    return updated;
   }
 
   listSourceBills(options = {}) {
