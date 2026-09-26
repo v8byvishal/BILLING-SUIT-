@@ -1,7 +1,7 @@
 {
   "name": "cghs-billing-suite-vnext",
   "productName": "CGHS Billing Suite VNEXT",
-  "version": "5.0.0-rc.1",
+  "version": "5.0.0-rc.2",
   "description": "Foundation desktop shell for the controlled evolution of the CGHS Billing Suite",
   "main": "src/desktop/main.js",
   "author": "CGHS Back Office",

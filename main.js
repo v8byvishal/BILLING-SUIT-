@@ -1,6 +1,6 @@
 /* ============================================================
    CGHS Billing Suite Pro - Desktop (Electron) main process
-   v5.0.0-rc.1
+   v5.0.0-rc.2
    - Encrypted SQLite database (AES-256-GCM at rest)
    - Atomic writes, automatic + manual backups, one-click restore
    - First-launch migration from browser localStorage backups
