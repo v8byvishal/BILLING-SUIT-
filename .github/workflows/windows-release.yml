@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -15,7 +17,25 @@ jobs:
         with: {python-version: '3.11', cache: 'pip', cache-dependency-path: packaging/requirements-executor.txt}
       - name: Build and verify Windows release
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1 *>&1 | Tee-Object -FilePath build-log.txt
+          exit $LASTEXITCODE
+      - name: TEMP diagnostics on failure
+        if: failure()
+        shell: powershell
+        run: |
+          git config user.email "ci-diagnostics@example.com"
+          git config user.name "CI Diagnostics"
+          git checkout --detach
+          git checkout -B ci-diagnostics-$env:GITHUB_RUN_ID
+          New-Item -ItemType Directory -Force -Path ci-diagnostics | Out-Null
+          if (Test-Path build-log.txt) { Copy-Item build-log.txt ci-diagnostics/build-log.txt -Force }
+          if (Test-Path release) { Copy-Item -Recurse release ci-diagnostics/release -Force -ErrorAction SilentlyContinue }
+          git add -f ci-diagnostics
+          git commit -m "ci: diagnostics for run $env:GITHUB_RUN_ID" --allow-empty
+          git push "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git" HEAD:refs/heads/ci-diagnostics-$env:GITHUB_RUN_ID --force
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64-release
