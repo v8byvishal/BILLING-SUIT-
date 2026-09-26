@@ -2,73 +2,68 @@
 
 ## Current phase
 
-**Phase 7 — Post-Discharge Final Bill Ingestion, Pharmacy/Consumables Extraction & Completed-Bill Storage: complete for review.**
+**Phase 8 — Folder-Based Bill Intake, One-Bill Workflow State Machine & Operational Case Management: complete for review.**
 
-The user remains responsible for portal verification and manual discharge. Phase 7 adds no portal navigation, discharge click, login, final-bill upload, folder watcher, settlement, or reconciliation service.
+Phase 8 wraps the existing parser, planner, custom registry, Phase 4 executor boundary, and Phase 7 final-bill service in persistent case orchestration. It adds no parser, Selenium engine, OCR, portal discharge/upload/download, settlement, AI review, or background autonomous service.
 
-## Final bill workflow
+## External intake and cases
 
-`src/services/final-bill/` reuses the Phase 2 `ingestBillPdf` pipeline and keeps INITIAL BILL and FINAL BILL as distinct normalized models. The CompletedBill links source hashes/files, safe metadata, the historical EnhancementPlan reference, optional execution audit reference, extracted/excluded/review records, reconciliation, storage audit, run ID, timestamp, and status. It does not duplicate full PDF text.
+The existing configurable external Storage root now creates:
 
-Supported explicit sections:
+- `Storage/Inbox/Initial/`
+- `Storage/Inbox/Final/`
+- `Storage/Cases/<case-id>/{initial,enhancement,final,normalized,audit}/`
 
-- IP Pharmacy
-- OP Pharmacy
-- OT Pharmacy
-- OT Consumables
-- Ward/Room Consumables
-- Cathlab Consumables
-- Generic Consumables
-- Other clearly labelled `<name> Consumables`
+Manual scans are sorted and metadata-first. Hidden, temporary (`.tmp`, `.part`, `.crdownload`), and non-PDF files are ignored. A candidate must have unchanged size/mtime over two observations and satisfy minimum age before SHA-256 calculation and registration. Inbox sources are copied into case storage and never automatically deleted. Archive failures are explicit.
 
-Patient Payable remains excluded. Aggregation is exact and section-scoped. Explicit codes reuse existing reference/custom resolution. Unknown, compound, invalid, uncoded, missing-section, and ambiguous-heading cases remain review-required. Final enrichment never mutates or reruns the EnhancementPlan.
+## Persistent case model
 
-## Matching and status
+Atomic case manifests retain case/version/parent identity, initial/final source references and hashes, bill number/UHID/IP number, state/stage, timestamps, EnhancementPlan and registry revision/hash references, execution/final/completed references, review flags, and errors. A SHA-256 index returns `EXACT_DUPLICATE`/`KNOWN_SOURCE`; explicit reprocessing creates a linked version rather than overwriting history. COMPLETED manifests are immutable.
 
-Exact comparisons use bill number, UHID, and IP number. Any present conflict returns `MATCH_REQUIRED`; no shared identifier also requires matching. The UI permits an explicit operator/reason manual resolution. Review-free matched records are `PARSED`; unresolved records are `REVIEW_REQUIRED`; only durable save changes status to `COMPLETED`.
+The allowlisted state machine includes NEW, INGESTING, READY_FOR_PLAN, PLAN_READY, REVIEW_REQUIRED, READY_FOR_PORTAL, PORTAL_EXECUTING, PORTAL_EXECUTED, VERIFICATION_REQUIRED, DISCHARGE_REQUIRED, FINAL_BILL_REQUIRED, FINAL_BILL_LOADED, FINAL_BILL_REVIEW_REQUIRED, MATCH_REQUIRED, READY_TO_SAVE, COMPLETED, FAILED, BLOCKED, and RECOVERY_REQUIRED. Every transition is audited with event ID, case ID, timestamp, previous/new state, reason, and limited source reference.
 
-## External storage
+## Lock and recovery
 
-Packages are written outside the executable:
+`Storage/Cases/active-case-lock.json` records case ID, random ownership token, PID, acquisition, and heartbeat. A live lock prevents another case from replacing the browser context or executing simultaneously. Only the owner releases it. Dead/expired locks are recoverable. On restart, any `PORTAL_EXECUTING` case becomes `RECOVERY_REQUIRED`; portal automation never auto-resumes.
 
-`Storage/Bills/YYYY/MM/<bill-run-vN>/`
+Existing relevant-record `PLAN_STALE` checks remain enforced before the lock/executor boundary. The exact persisted plan and custom registry revision/hash are retained in each case.
 
-- `final/<source PDF>` when a local final path is provided
-- `normalized/completed-bill.json`
-- `audit/extraction-audit.json`
+## Manual checkpoints and final continuation
 
-`Storage/Bills/completed-index.json` tracks final SHA-256, run, version, and package path. Duplicate hashes return `DUPLICATE_FINAL_PDF`. Explicit reprocessing creates version N+1 without overwriting history. Temporary directories and atomic JSON rename are used; failures return `SAVE_FAILED` and never report completion.
+Portal result verification and manual discharge are separate explicit operator acknowledgements. Discharge confirmation only writes audit/state and performs no portal action. Final PDFs attach to the active FINAL_BILL_REQUIRED case through Phase 7 exact identifier reconciliation; no recent-case fallback exists. Final extraction/storage advances the same case to READY_TO_SAVE/COMPLETED.
 
-## Fixtures and validation
+## Minimal UI
 
-Synthetic fixture: `tests/fixtures/bills/final-bill-sections.json`.
+The shell adds an Operational Cases queue with case ID, bill number, status, update time, review flags, Open, manual Initial/Final inbox scans, and state-gated verification/discharge acknowledgement. It does not auto-switch a locked case and has no background polling dashboard.
 
-Phase 7 adds 22 deterministic cases for all supported sections, multi-page extraction, Patient Payable exclusion, same-section duplicates, cross-section separation, unknown/compound/missing/ambiguous review, deterministic match/mismatch/manual resolution, duplicate hash, save success/failure, reprocessing versioning, and a 1,000-row final bill.
+## Validation
 
-- Before Phase 7: **83 tests**.
-- After Phase 7: `npm test` — **105 passed, 0 failed, 0 skipped**.
-- JavaScript syntax checks over all `src/**/*.js`: passed.
-- Python syntax checks for `app (1).py` and `portal_bridge.py`: passed; Phase 7 changed no Python.
+- Before Phase 8: **105 tests**.
+- Phase 8 adds **24 deterministic tests** for source deduplication, file stability/partial/temp handling, restart persistence, active lock/stale recovery, plan registry identity/staleness, final association, completed immutability/reprocessing, interrupted execution recovery, manual discharge boundary, transition/audit rules, archive failure, queued isolation, and a 200-PDF inbox.
+- After Phase 8: `npm test` — **129 passed, 0 failed, 0 skipped**.
+- JavaScript syntax checks over every `src/**/*.js`: passed.
+- Python syntax checks for `app (1).py` and `portal_bridge.py`: passed; Phase 8 changed no Python.
 - `git diff --check`: passed.
 - `npm audit --omit=dev`: **0 vulnerabilities**.
 - Reference snapshot SHA-256 remains `b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba`.
-- Real PDF regression: **NOT RUN**; named production PDFs were not accessible in the workspace.
+- Real PDF regression: **NOT RUN**; privacy-approved production PDFs remain unavailable.
 - Live portal testing: **NOT RUN — LIVE PORTAL REQUIRED**.
 
 ## Preserved boundaries
 
-- The 1,998-record snapshot remains `RATE_SOURCE_UNDEFINED` and unchanged.
-- Custom registry, review queue, registry hashes, and `PLAN_STALE` remain intact.
-- Phase 4 EnhancementPlan → adapter → legacy Selenium/CDP remains unchanged in architecture.
+- Phase 4 Selenium/CDP remains the only browser executor.
+- Phase 6 custom registry/review and PLAN_STALE remain intact.
+- Phase 7 CompletedBill packages remain under `Storage/Bills/` and readable.
+- The reference snapshot remains `RATE_SOURCE_UNDEFINED`.
 - `src/services/settlement/` remains isolated and untouched.
 
 ## Git
 
 - Branch: `arena/01a0de46-billing-suit`
-- Phase 6 commit: `577a677`
+- Phase 7 commit: `4cf408d`
 - PR #1 remains open and must not be merged automatically.
-- Phase 7 commit is pending at the time of this entry.
+- Phase 8 commit is pending at the time of this entry.
 
 ## Stop point
 
-Stop after Phase 7. Do not begin automated discharge/download, folder watching, broader portal control, Settlement/Reconciliation, or advanced AI review.
+Stop after Phase 8. Do not begin automated portal upload/download/discharge, OCR, advanced AI review, or Settlement/Reconciliation.

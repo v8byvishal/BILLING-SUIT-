@@ -10,7 +10,7 @@
 | 5 | Production PDF regression, parser accuracy hardening, and enhancement validation | Complete with synthetic fixtures; real PDFs unavailable to workspace |
 | 6 | Review queue, custom/unslotted code registry, and controlled overrides | Complete; deterministic persistence/staleness tests passed |
 | 7 | Post-discharge final bill ingestion, enrichment, and completed package storage | Complete with synthetic fixtures; real PDF regression unavailable |
-| 8 | Performance and reliability optimization | Not started |
+| 8 | Folder intake, one-case workflow state machine, locking, and recovery | Complete; deterministic operational tests passed |
 | 9 | EXE packaging/deployment hardening | Not started |
 | 10 | Full regression and release validation | Not started |
 

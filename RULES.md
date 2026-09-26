@@ -71,6 +71,16 @@ The existing Python Selenium executor remains authoritative for procedure search
 - Initial/final association uses exact bill number, UHID, and IP number comparisons. Conflicts stop; missing shared identifiers require an audited manual match.
 - A bill is `COMPLETED` only after a review-free matched record is durably stored. Duplicate final hashes are blocked unless explicitly reprocessed as a new version.
 
+## Phase 8 workflow policy
+
+- Every initial source hash owns one persistent case unless the operator explicitly requests linked reprocessing.
+- Folder intake hashes only PDFs proven stable across unchanged observations; temporary, partial, hidden, and non-PDF files are ignored or left waiting.
+- Case state changes must be allowlisted and audited with previous/new state. COMPLETED cases are immutable.
+- A persisted token/PID/timestamp lock allows only one portal-executing case. Interrupted execution becomes `RECOVERY_REQUIRED` and is never resumed automatically.
+- Verification and discharge are separate operator acknowledgements. Discharge confirmation performs no portal operation.
+- Final sources attach only through Phase 7 deterministic matching; no “most recent case” fallback exists.
+- Original inbox files are copied into case archives and never automatically deleted.
+
 ## Prohibited scope
 
 No second Selenium engine, selector duplication, credential/login automation, security bypass, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented. Settlement remains isolated under `src/services/settlement/`.

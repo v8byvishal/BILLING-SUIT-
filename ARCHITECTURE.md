@@ -142,6 +142,16 @@ Final PDF → existing ingestion pipeline → section-aware enrichment
 
 Deterministic matching compares bill number, UHID, and IP number. Any conflict stops automatic association; no shared identifier requires an explicit operator/reason resolution. Storage writes versioned packages under `Storage/Bills/YYYY/MM/<bill-run-vN>/` with normalized JSON, extraction audit, and one final-PDF copy when available. A SHA-256 index blocks duplicate final PDFs unless explicit reprocessing creates a new version. Temporary directories and atomic JSON writes prevent silent overwrite; save errors return `SAVE_FAILED` and never `COMPLETED`.
 
+## Phase 8 operational case boundary
+
+Phase 8 adds persistent orchestration around existing services, not another parser or executor. `CaseStore` keeps atomic manifests, normalized artifacts, and append-only workflow audit under `Storage/Cases/<case-id>/`. `InboxScanner` manually scans `Storage/Inbox/Initial/` and `Storage/Inbox/Final/`, ignores temporary/non-PDF files, requires two unchanged size/mtime observations plus minimum age, then hashes stable PDFs. Originals are copied, never deleted.
+
+`case-state-machine.js` allowlists transitions from NEW through planning, portal checkpoints, explicit verification/discharge acknowledgements, final-bill handling, and COMPLETED. Invalid/skipped transitions fail. Restart converts interrupted `PORTAL_EXECUTING` cases to `RECOVERY_REQUIRED`; live portal work never auto-resumes.
+
+`ActiveCaseLock` persists case ID, process ID, token, acquisition time, and heartbeat. Only its owner can release it. A live lock prevents another case from replacing browser context; dead/expired locks require deterministic recovery. Existing `PLAN_STALE` validation remains at the adapter boundary.
+
+The configured external Storage root now contains `Inbox/Initial`, `Inbox/Final`, and `Cases` without migrating or changing existing `Custom_Codes`, `Audit`, or `Bills` data. Source SHA-256 is the duplicate identity. Completed cases are immutable; explicit reprocessing creates a linked versioned case.
+
 ## Development and packaging
 
 - Install pinned dependencies: `npm install`

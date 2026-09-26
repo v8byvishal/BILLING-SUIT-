@@ -4,6 +4,7 @@ let portalPreview = null;
 let currentReviewQueue = [];
 let selectedReview = null;
 let currentCompletedBill = null;
+let currentCase = null;
 
 function button(label, onClick) {
   const element = document.createElement('button'); element.type = 'button'; element.textContent = label; element.addEventListener('click', onClick); return element;
@@ -40,6 +41,16 @@ function renderPlan(plan) {
   document.getElementById('portalView').hidden = false;
 }
 
+function updateCaseActions(manifest) {
+  currentCase=manifest;text('currentCaseStatus',manifest?`${manifest.case_id} · ${manifest.workflow_status}`:'NO ACTIVE CASE');
+  document.getElementById('confirmVerification').hidden=manifest?.workflow_status!=='VERIFICATION_REQUIRED';
+  document.getElementById('confirmDischarge').hidden=manifest?.workflow_status!=='DISCHARGE_REQUIRED';
+  document.getElementById('loadFinalBill').disabled=manifest?.workflow_status!=='FINAL_BILL_REQUIRED'&&manifest?.workflow_status!=='MATCH_REQUIRED';
+}
+async function loadCases(){const cases=await window.vnext.listCases();const body=document.getElementById('caseRows');body.replaceChildren();for(const item of cases){const row=document.createElement('tr');for(const value of [item.case_id,item.bill_number,item.workflow_status,item.updated_at,(item.review_flags||[]).join(', ')]){const cell=document.createElement('td');cell.textContent=value||'—';row.appendChild(cell);}const action=document.createElement('td');action.append(button('Open',async()=>{const result=await window.vnext.openCase(item.case_id);updateCaseActions(result.manifest);if(result.enhancementPlan)renderPlan(result.enhancementPlan);}));row.appendChild(action);body.appendChild(row);}return cases;}
+async function scanInbox(kind){const result=await window.vnext.scanInbox(kind);await loadCases();const waiting=result.files.filter(x=>x.status==='WAITING_FOR_STABLE_FILE').length;window.alert(`${kind} inbox: ${result.outcomes.length} registered, ${waiting} waiting for file stability.`);}
+async function confirmCaseStep(kind){const operator=window.prompt('Operator identifier');if(!operator)return;const manifest=kind==='verification'?await window.vnext.confirmVerification(operator):await window.vnext.confirmDischarge(operator);updateCaseActions(manifest);await loadCases();}
+
 async function selectAndParseBill() {
   const button = document.getElementById('selectBill');
   const resultPanel = document.getElementById('parseResult');
@@ -54,7 +65,9 @@ async function selectAndParseBill() {
       text('parseMessage', 'No PDF selected.');
       return;
     }
+    if(result.duplicate){text('parseStatus','EXACT_DUPLICATE');text('parseMessage',`Existing case ${result.case.case_id} already owns this source hash.`);await loadCases();return;}
     const bill = result.bill;
+    updateCaseActions(result.case);
     const primaryItems = bill.items.filter((item) => item.included_in_primary_bill).length;
     text('parseStatus', 'PARSED');
     text('parsedFile', bill.source.file_name);
@@ -63,8 +76,8 @@ async function selectAndParseBill() {
     text('excludedSections', bill.excluded_sections.length);
     text('parseMessage', `${bill.sections.length} primary section(s), ${bill.parsing_audit.compound_expressions.length} compound expression(s), ${bill.bed_details.length} Bed Detail row(s), ${result.enhancementPlan.entries.length} plan entry/entries. No portal operation was performed.`);
     renderPlan(result.enhancementPlan);
-    document.getElementById('loadFinalBill').disabled = false;
     await loadReviewQueue();
+    await loadCases();
     text('appState', 'BILL_LOADED');
   } catch (error) {
     text('parseStatus', 'ERROR');
@@ -162,14 +175,14 @@ function renderCompletedBill(completed) {
 async function loadFinalBill() {
   if (!document.getElementById('manualDischargeConfirmed').checked) { window.alert('Confirm manual portal verification and discharge before loading the final bill.'); return; }
   text('finalBillStatus', 'PARSING');
-  try { const result = await window.vnext.selectAndParseFinalBill(); if (!result.canceled) renderCompletedBill(result.completedBill); }
+  try { const result = await window.vnext.selectAndParseFinalBill(); if (!result.canceled&&result.completedBill){renderCompletedBill(result.completedBill);if(result.case)updateCaseActions(result.case);await loadCases();} }
   catch (error) { text('finalBillStatus', 'FAILED'); text('finalBillMessage', error.message); }
 }
 
 async function resolveFinalMatch() {
   const operator = window.prompt('Operator identifier'); const reason = window.prompt('Reason this final bill belongs to the loaded initial bill');
   if (!operator || !reason) return;
-  try { renderCompletedBill(await window.vnext.resolveFinalBillMatch({ operator, reason })); } catch (error) { window.alert(error.message); }
+  try { renderCompletedBill(await window.vnext.resolveFinalBillMatch({ operator, reason })); const cases=await loadCases();const active=cases.find(item=>item.case_id===currentCase?.case_id);if(active)updateCaseActions(active); } catch (error) { window.alert(error.message); }
 }
 
 async function saveFinalBill() {
@@ -177,7 +190,7 @@ async function saveFinalBill() {
     const result = await window.vnext.saveCompletedBill({ allowReprocess: false });
     text('finalBillStatus', result.status);
     text('finalBillMessage', result.status === 'COMPLETED' ? `Saved completed package: ${result.package_path}` : result.status === 'DUPLICATE_FINAL_PDF' ? 'This final PDF is already stored.' : result.reason);
-    if (result.status === 'COMPLETED') document.getElementById('saveCompletedBill').disabled = true;
+    if (result.status === 'COMPLETED'){document.getElementById('saveCompletedBill').disabled = true;const cases=await loadCases();const active=cases.find(item=>item.case_id===currentCase?.case_id);if(active)updateCaseActions(active);}
   } catch (error) { text('finalBillStatus', 'SAVE_FAILED'); text('finalBillMessage', error.message); }
 }
 
@@ -200,6 +213,7 @@ async function executePortal() {
     const audit = await window.vnext.executePortalActions();
     text('portalStatus', audit.status);
     text('portalSummary', `Verified results: ${audit.counts.EXECUTED} executed, ${audit.counts.ALREADY_PRESENT} already present, ${audit.counts.FAILED} failed, ${audit.counts.UNKNOWN} unknown, ${audit.counts.BLOCKED} blocked.`);
+    const cases=await loadCases();const active=cases.find(item=>item.case_id===currentCase?.case_id);if(active)updateCaseActions(active);
     const output = document.getElementById('portalAudit');
     output.textContent = JSON.stringify(audit, null, 2);
     output.hidden = false;
@@ -230,7 +244,12 @@ async function initialize() {
     document.getElementById('loadFinalBill').addEventListener('click', loadFinalBill);
     document.getElementById('resolveFinalMatch').addEventListener('click', resolveFinalMatch);
     document.getElementById('saveCompletedBill').addEventListener('click', saveFinalBill);
+    document.getElementById('scanInitialInbox').addEventListener('click',()=>scanInbox('initial'));
+    document.getElementById('scanFinalInbox').addEventListener('click',()=>scanInbox('final'));
+    document.getElementById('confirmVerification').addEventListener('click',()=>confirmCaseStep('verification'));
+    document.getElementById('confirmDischarge').addEventListener('click',()=>confirmCaseStep('discharge'));
     await loadRegistry();
+    await loadCases();
     await window.vnext.reportRendererReady();
   } catch (error) {
     text('readyStatus', 'Startup error');

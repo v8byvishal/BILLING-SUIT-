@@ -1,19 +1,23 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
+const crypto = require('node:crypto');
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const { loadConfig } = require('../core/config');
 const { createLogger } = require('../core/logger');
 const { createAppState } = require('../core/app-state');
 const { ensureStorage, resolveStoragePath } = require('../core/storage');
-const { ingestBillPdf } = require('../services/bill-ingestion');
 const { createBundledRateRepository, evaluateBill } = require('../services/cghs');
 const { adaptEnhancementPlan } = require('../adapters/legacy-portal/plan-adapter');
 const { LegacyPythonRunner } = require('../adapters/legacy-portal/python-runner');
 const { executeEnhancementPlan } = require('../services/portal/portal-execution-service');
 const { CustomCodeRegistry } = require('../services/custom-codes/custom-code-registry');
 const { createReviewQueue } = require('../services/custom-codes/review-queue');
-const { ingestFinalBill, resolveFinalBillMatch, saveCompletedBill } = require('../services/final-bill');
+const { CaseStore } = require('../services/cases/case-store');
+const { ActiveCaseLock } = require('../services/cases/active-case-lock');
+const { InboxScanner } = require('../services/cases/inbox-scanner');
+const { CaseWorkflowService } = require('../services/cases/case-workflow-service');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
@@ -27,6 +31,11 @@ let currentEnhancementPlan = null;
 let currentExecutionAudit = null;
 let currentFinalBillPath = null;
 let currentCompletedBill = null;
+let currentCaseId = null;
+let caseStore = null;
+let caseLock = null;
+let inboxScanner = null;
+let caseWorkflow = null;
 const state = createAppState();
 
 function publicConfig() {
@@ -42,6 +51,7 @@ function publicConfig() {
 function rebuildRateRepository() {
   const snapshot = customCodeRegistry.snapshot();
   rateRepository = createBundledRateRepository(customCodeRegistry.activeRateEntries(), { customRegistrySnapshot: snapshot });
+  if (caseWorkflow) caseWorkflow.rateRepository = rateRepository;
 }
 
 function refreshCurrentPlan() {
@@ -49,6 +59,13 @@ function refreshCurrentPlan() {
   if (currentBill) {
     currentEnhancementPlan = evaluateBill(currentBill, rateRepository);
     customCodeRegistry.recordPlanUsage(currentEnhancementPlan);
+    if (currentCaseId) {
+      const planPath = caseStore.writeArtifact(currentCaseId, 'enhancement/plan.json', currentEnhancementPlan);
+      caseStore.patch(currentCaseId, { enhancement_plan_reference: { path: planPath, plan_version: currentEnhancementPlan.plan_version,
+        registry_revision: currentEnhancementPlan.custom_registry?.revision || null, registry_hash: currentEnhancementPlan.custom_registry?.hash || null } }, 'PLAN_REGENERATED', 'Custom registry changed by explicit operator action');
+      const manifest = caseStore.load(currentCaseId); const reviews = createReviewQueue(currentEnhancementPlan);
+      if (manifest.workflow_status === 'REVIEW_REQUIRED' && !reviews.length) caseStore.transition(currentCaseId, 'PLAN_READY', 'Regenerated plan has no open review records');
+    }
   }
   return currentEnhancementPlan;
 }
@@ -57,6 +74,9 @@ function registerIpc() {
   ipcMain.handle('app:get-status', () => ({ ready: true, state: state.get(), version: app.getVersion() }));
   ipcMain.handle('storage:get-info', () => storageInfo);
   ipcMain.handle('config:get-public', () => publicConfig());
+  ipcMain.handle('cases:list',()=>caseStore.list());
+  ipcMain.handle('cases:open',(_event,id)=>{const manifest=caseWorkflow.openCase(id);currentCaseId=id;const initialPath=path.join(caseStore.directory(id),'normalized','initial-bill.json');const planPath=path.join(caseStore.directory(id),'enhancement','plan.json');currentBill=fs.existsSync(initialPath)?JSON.parse(fs.readFileSync(initialPath)):null;currentEnhancementPlan=fs.existsSync(planPath)?JSON.parse(fs.readFileSync(planPath)):null;return{manifest,bill:currentBill,enhancementPlan:currentEnhancementPlan};});
+  ipcMain.handle('inbox:scan',async(_event,kind='initial')=>{const files=inboxScanner.scan(kind);const outcomes=[];for(const file of files.filter(x=>x.status==='STABLE')){if(kind==='initial')outcomes.push(await caseWorkflow.importInitial(file));else if(currentCaseId&&caseStore.load(currentCaseId).workflow_status==='FINAL_BILL_REQUIRED')outcomes.push(await caseWorkflow.attachFinal(currentCaseId,file,currentEnhancementPlan,currentExecutionAudit));}return{files,outcomes,cases:caseStore.list()};});
   ipcMain.handle('bill:select-and-parse', async () => {
     const selection = await dialog.showOpenDialog(mainWindow, {
       title: 'Select hospital bill PDF',
@@ -66,22 +86,16 @@ function registerIpc() {
     if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
     state.set('ANALYZING');
     try {
-      const bill = await ingestBillPdf(selection.filePaths[0]);
-      const enhancementPlan = evaluateBill(bill, rateRepository);
-      currentBill = bill;
-      currentEnhancementPlan = enhancementPlan;
+      const filePath = selection.filePaths[0];
+      const source = { file_path: filePath, file_name: path.basename(filePath), sha256: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') };
+      const result = await caseWorkflow.importInitial(source);
+      if (result.outcome === 'EXACT_DUPLICATE') return { canceled: false, duplicate: true, case: result.case };
+      if (!result.bill || !result.plan) throw new Error(result.reason || result.outcome);
+      currentCaseId = result.case.case_id; currentBill = result.bill; currentEnhancementPlan = result.plan;
       currentExecutionAudit = null; currentFinalBillPath = null; currentCompletedBill = null;
-      customCodeRegistry.recordPlanUsage(enhancementPlan);
-      state.set('BILL_LOADED');
-      logger.info('Bill PDF parsed and deterministic plan prepared', {
-        pages: bill.parsing_audit.pages_processed,
-        sections: bill.parsing_audit.sections_detected.length,
-        items: bill.parsing_audit.raw_items_detected,
-        excludedSections: bill.parsing_audit.excluded_patient_payable_sections.length,
-        planEntries: enhancementPlan.entries.length,
-        planWarnings: enhancementPlan.warnings.length
-      });
-      return { canceled: false, bill, enhancementPlan };
+      customCodeRegistry.recordPlanUsage(result.plan); state.set('BILL_LOADED');
+      logger.info('Case initial bill parsed and plan persisted', { caseId: currentCaseId, pages: result.bill.parsing_audit.pages_processed, planEntries: result.plan.entries.length, workflowStatus: result.case.workflow_status });
+      return { canceled: false, case: result.case, bill: result.bill, enhancementPlan: result.plan };
     } catch (error) {
       state.set('ERROR');
       logger.error('Bill PDF parsing failed', error);
@@ -111,36 +125,42 @@ function registerIpc() {
     return adaptEnhancementPlan(currentEnhancementPlan, { registrySnapshot: customCodeRegistry.snapshot() });
   });
   ipcMain.handle('portal:execute', async () => {
-    if (!currentEnhancementPlan) throw new Error('Parse a bill before portal execution');
-    logger.info('User requested legacy portal execution; authenticated Chrome CDP session is required');
-    const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner(), { registrySnapshot: customCodeRegistry.snapshot() });
-    currentExecutionAudit = audit;
-    logger.info('Portal execution finished', { runId: audit.run_id, status: audit.status, counts: audit.counts });
-    return audit;
+    if (!currentEnhancementPlan || !currentCaseId) throw new Error('Open a persisted case before portal execution');
+    const manifest = caseStore.load(currentCaseId);
+    if (manifest.workflow_status === 'PLAN_READY') caseWorkflow.markReadyForPortal(currentCaseId);
+    caseWorkflow.beginPortal(currentCaseId);
+    logger.info('Case portal execution started; authenticated Chrome CDP session is required', { caseId: currentCaseId });
+    try {
+      const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner(), { registrySnapshot: customCodeRegistry.snapshot() });
+      currentExecutionAudit = audit; caseWorkflow.recordPortalResult(currentCaseId, audit);
+      logger.info('Case portal execution finished', { caseId: currentCaseId, runId: audit.run_id, status: audit.status, counts: audit.counts });
+      return audit;
+    } catch (error) { caseWorkflow.failPortal(currentCaseId, error); throw error; }
   });
+  ipcMain.handle('case:confirm-verification', (_event, operator) => caseWorkflow.confirmVerification(currentCaseId, operator));
+  ipcMain.handle('case:confirm-discharge', (_event, operator) => caseWorkflow.confirmDischarge(currentCaseId, operator));
   ipcMain.handle('final-bill:select-and-parse', async () => {
     if (!currentBill || !currentEnhancementPlan) throw new Error('Load and analyze the initial bill before loading a final bill');
     const selection = await dialog.showOpenDialog(mainWindow, { title: 'Select final bill PDF after manual discharge', properties: ['openFile'], filters: [{ name: 'PDF documents', extensions: ['pdf'] }] });
     if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
     try {
-      const result = await ingestFinalBill(selection.filePaths[0], { initialBill: currentBill, enhancementPlan: currentEnhancementPlan,
-        executionAudit: currentExecutionAudit, rateRepository });
-      currentFinalBillPath = selection.filePaths[0]; currentCompletedBill = result.completedBill;
-      logger.info('Final bill parsed locally', { runId: currentCompletedBill.run_id, status: currentCompletedBill.status,
-        sections: currentCompletedBill.final_extracted_sections.length, reviewItems: currentCompletedBill.review_required_records.length });
-      return { canceled: false, completedBill: currentCompletedBill };
-    } catch (error) { logger.error('Final bill parsing failed', { message: error.message }); throw new Error(`Final bill could not be parsed: ${error.message}`); }
+      const filePath=selection.filePaths[0]; const file={file_path:filePath,file_name:path.basename(filePath),sha256:crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')};
+      const result=await caseWorkflow.attachFinal(currentCaseId,file,currentEnhancementPlan,currentExecutionAudit);
+      currentFinalBillPath=filePath;currentCompletedBill=result.completedBill||null;
+      if(!currentCompletedBill)return{canceled:false,outcome:result.outcome,case:result.case};
+      logger.info('Case final bill parsed locally',{caseId:currentCaseId,runId:currentCompletedBill.run_id,status:currentCompletedBill.status});
+      return{canceled:false,outcome:result.outcome,case:result.case,completedBill:currentCompletedBill};
+    } catch (error) { logger.error('Final bill parsing failed', { caseId:currentCaseId,message:error.message }); throw new Error(`Final bill could not be parsed: ${error.message}`); }
   });
   ipcMain.handle('final-bill:resolve-match', (_event, decision) => {
-    currentCompletedBill = resolveFinalBillMatch(currentCompletedBill, decision);
-    logger.info('Final bill match manually resolved', { runId: currentCompletedBill.run_id, operator: decision.operator });
-    return currentCompletedBill;
+    const file={file_path:currentFinalBillPath,file_name:path.basename(currentFinalBillPath),sha256:currentCompletedBill.final_bill_reference.source.sha256};
+    const result=caseWorkflow.resolveFinalMatch(currentCaseId,currentCompletedBill,file,decision);currentCompletedBill=result.completedBill;
+    logger.info('Case final bill match manually resolved',{caseId:currentCaseId,runId:currentCompletedBill.run_id,operator:decision.operator});return currentCompletedBill;
   });
   ipcMain.handle('final-bill:save', (_event, options = {}) => {
     if (!currentCompletedBill) throw new Error('Load a final bill before saving');
-    const result = saveCompletedBill(storageInfo.path, currentCompletedBill, { finalPdfPath: currentFinalBillPath, allowReprocess: options.allowReprocess === true });
-    logger.info('Completed bill storage result', { runId: currentCompletedBill.run_id, status: result.status, reason: result.reason || null });
-    return result;
+    const result=caseWorkflow.saveCompleted(currentCaseId,currentCompletedBill,{finalPdfPath:currentFinalBillPath,allowReprocess:options.allowReprocess===true});
+    logger.info('Case completed bill storage result',{caseId:currentCaseId,runId:currentCompletedBill.run_id,status:result.status,reason:result.reason||null});return result;
   });
   ipcMain.handle('app:renderer-ready', () => {
     logger.info('Renderer ready', { state: state.get() });
@@ -191,12 +211,16 @@ async function bootstrap() {
     logger = createLogger({ logsDir: path.join(storagePath, 'Logs'), level: config.logging.level, source: 'desktop-main' });
     customCodeRegistry = new CustomCodeRegistry(storagePath);
     rebuildRateRepository();
+    caseStore=new CaseStore(storagePath);caseLock=new ActiveCaseLock(storagePath);inboxScanner=new InboxScanner(storagePath);
+    caseWorkflow=new CaseWorkflowService({store:caseStore,lock:caseLock,rateRepository,registrySnapshot:()=>customCodeRegistry.snapshot(),storageRoot:storagePath});
+    const recoveredCases=caseWorkflow.interruptPortalCases();
     logger.info('Application startup', {
       appDir: APP_DIR,
       storagePath,
       version: app.getVersion(),
       rateRecords: rateRepository.provenance.record_count,
-      rateAuthority: rateRepository.provenance.authority_status
+      rateAuthority: rateRepository.provenance.authority_status,
+      recoveredCases: recoveredCases.length
     });
     registerIpc();
     createWindow();
@@ -224,5 +248,5 @@ process.on('unhandledRejection', (error) => { surfaceFatal(error); app.exit(1); 
 app.whenReady().then(bootstrap);
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
-  try { logger?.info('Application shutdown requested', { state: state.get() }); } catch (_) { /* controlled best effort */ }
+  try { if(caseLock?.token)caseLock.release(); logger?.info('Application shutdown requested', { state: state.get(),caseId:currentCaseId }); } catch (_) { /* controlled best effort */ }
 });
