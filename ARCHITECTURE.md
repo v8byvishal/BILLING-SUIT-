@@ -67,6 +67,27 @@ The Electron main process exposes one controlled `bill:select-and-parse` operati
 
 `src/services/settlement/README.md` is the only new settlement artifact. Registration-ID reconciliation, IP-first/OP-fallback matching, Bill No/UHID enrichment, and settlement statuses remain a separate future service and are not imported into parsing.
 
+## Phase 3 deterministic CGHS service
+
+`src/services/cghs/` consumes the Phase 2 `BillDocument` and produces a machine-readable `EnhancementPlan` without portal access.
+
+```text
+BillDocument
+  ├─ exact direct-code aggregates → rate repository
+  ├─ Bed Details / Room Rent → CN002, CC001, WC001 rules → rate repository
+  └─ oxygen source rows → CC002 rule → rate repository
+                              ↓
+                       EnhancementPlan
+```
+
+The rate-list layer loads, validates, normalizes, indexes, and looks up local JSON sources. The only repository rate data is a 1,998-record snapshot extracted byte-for-byte from the embedded `MASTER_CGHS` object in `CGHS_Billing_Suite_Pro.html`. Its source/effective version cannot be proven, so metadata and every resulting plan identify it as `RATE_SOURCE_UNDEFINED`; its rates are visible as reference evidence but cannot produce financial amounts. A separately supplied source explicitly marked `AUTHORITATIVE` can produce deterministic rate × quantity amounts. Auditable custom/local entries are indexed separately and never overwrite source records.
+
+Dedicated rules preserve legacy behavior: CN002 uses ICU rows ×3 plus supported ward rows ×2; CC001 counts ICU evidence; WC001 counts supported ward evidence; and CC002 evaluates oxygen rows as half day 12/full day 24/unqualified legacy single unit 1. Ambiguous categories or oxygen phrases return `REVIEW_REQUIRED`. Raw CN002/CC001/WC001 and raw C002/CC002 candidates are rejected from direct counting and retained in audit.
+
+Compound syntax is consumed from Phase 2. Each base component is looked up, but expressions with qualifiers or multiple components remain `UNRESOLVED_COMPOUND`/`RULE_UNDEFINED`; no `+L` semantics are invented.
+
+The Electron renderer receives the plan through the existing controlled PDF operation and shows a small diagnostics table. No rate-editing UI, portal operation, Registration-ID matching, or Settlement/Reconciliation processing is exposed.
+
 ## Future integration boundary
 
 Later approved phases may connect:

@@ -24,6 +24,16 @@ h1 { margin:-2px 0 0; font-size:29px; letter-spacing:-.04em; }
 .parse-result span { display:block; color:var(--muted); font-size:11px; }
 .parse-result strong { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .parse-result p { grid-column:1/-1; margin:0; padding:10px 16px; background:#fff; color:var(--muted); }
+.plan-view { border:1px solid var(--line); border-radius:10px; background:var(--surface); overflow:hidden; }
+.plan-view[hidden] { display:none; }
+.plan-head { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:17px 20px; border-bottom:1px solid var(--line); }
+.plan-head h3,.plan-head p { margin:0; }
+.plan-head p { margin-top:3px; color:var(--muted); font-size:11px; }
+.plan-head > span { color:#855f14; background:#fff6df; border:1px solid #ead5a4; border-radius:14px; padding:5px 9px; font-size:11px; }
+.table-wrap { overflow:auto; max-height:310px; }
+table { width:100%; border-collapse:collapse; font-size:12px; }
+th,td { padding:10px 14px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+th { color:var(--muted); background:#f8f9fa; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
 .future h3 { margin:0; font-size:18px; }
 .future > p { margin:5px 0 16px; color:var(--muted); }
 .areas { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }

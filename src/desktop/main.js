@@ -7,12 +7,14 @@ const { createLogger } = require('../core/logger');
 const { createAppState } = require('../core/app-state');
 const { ensureStorage, resolveStoragePath } = require('../core/storage');
 const { ingestBillPdf } = require('../services/bill-ingestion');
+const { createBundledRateRepository, evaluateBill } = require('../services/cghs');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
 let logger = null;
 let config = null;
 let storageInfo = null;
+let rateRepository = null;
 const state = createAppState();
 
 function publicConfig() {
@@ -39,14 +41,17 @@ function registerIpc() {
     state.set('ANALYZING');
     try {
       const bill = await ingestBillPdf(selection.filePaths[0]);
+      const enhancementPlan = evaluateBill(bill, rateRepository);
       state.set('BILL_LOADED');
-      logger.info('Bill PDF parsed', {
+      logger.info('Bill PDF parsed and deterministic plan prepared', {
         pages: bill.parsing_audit.pages_processed,
         sections: bill.parsing_audit.sections_detected.length,
         items: bill.parsing_audit.raw_items_detected,
-        excludedSections: bill.parsing_audit.excluded_patient_payable_sections.length
+        excludedSections: bill.parsing_audit.excluded_patient_payable_sections.length,
+        planEntries: enhancementPlan.entries.length,
+        planWarnings: enhancementPlan.warnings.length
       });
-      return { canceled: false, bill };
+      return { canceled: false, bill, enhancementPlan };
     } catch (error) {
       state.set('ERROR');
       logger.error('Bill PDF parsing failed', error);
@@ -100,7 +105,14 @@ async function bootstrap() {
     });
     storageInfo = ensureStorage(storagePath);
     logger = createLogger({ logsDir: path.join(storagePath, 'Logs'), level: config.logging.level, source: 'desktop-main' });
-    logger.info('Application startup', { appDir: APP_DIR, storagePath, version: app.getVersion() });
+    rateRepository = createBundledRateRepository();
+    logger.info('Application startup', {
+      appDir: APP_DIR,
+      storagePath,
+      version: app.getVersion(),
+      rateRecords: rateRepository.provenance.record_count,
+      rateAuthority: rateRepository.provenance.authority_status
+    });
     registerIpc();
     createWindow();
   } catch (error) {

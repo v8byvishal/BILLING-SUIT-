@@ -19,9 +19,9 @@
 
     <section class="welcome" aria-labelledby="welcomeTitle">
       <div class="copy">
-        <p class="phase">FOUNDATION · PHASE 1</p>
-        <h2 id="welcomeTitle">Application foundation is ready.</h2>
-        <p>Select a local hospital bill PDF to extract page-aware text and create a traceable normalized bill model. CGHS calculations and portal automation are not part of this phase.</p>
+        <p class="phase">DETERMINISTIC RULES · PHASE 3</p>
+        <h2 id="welcomeTitle">Inspect a local enhancement plan.</h2>
+        <p>Select a hospital bill PDF to parse it once and evaluate local deterministic code/rule results. The bundled rates are an unverified HFOS reference snapshot, not confirmed official authority. Nothing is sent to a portal.</p>
         <button class="primary-action" id="selectBill" type="button">Select PDF</button>
       </div>
       <dl class="readiness">
@@ -40,12 +40,17 @@
       <p id="parseMessage"></p>
     </section>
 
+    <section class="plan-view" id="planView" hidden aria-labelledby="planTitle">
+      <div class="plan-head"><div><h3 id="planTitle">Deterministic enhancement plan</h3><p id="rateSource">Rate source —</p></div><span id="planWarning">Review required</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Code</th><th>Quantity</th><th>Rate</th><th>Amount</th><th>Source / Rule</th><th>Status</th></tr></thead><tbody id="planRows"></tbody></table></div>
+    </section>
+
     <section class="future" aria-label="Planned workflow areas">
       <h3>Workflow boundaries</h3>
-      <p>Parsing is available. Later modules remain inactive until separately approved.</p>
+      <p>Parsing and local deterministic planning are available. Portal and later modules remain inactive.</p>
       <div class="areas">
         <article><span>01</span><h4>Bill ingestion</h4><p>Phase 2 parser available</p></article>
-        <article><span>02</span><h4>Enhancement workflow</h4><p>Not implemented</p></article>
+        <article><span>02</span><h4>Rule evaluation</h4><p>Phase 3 local plan available</p></article>
         <article><span>03</span><h4>Final bill workflow</h4><p>Not implemented</p></article>
         <article><span>04</span><h4>Settings</h4><p>Foundation only</p></article>
       </div>

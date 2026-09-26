@@ -1,10 +1,40 @@
 # CGHS Billing Suite VNEXT — Rule Preservation Register
 
-Phase 2 implements syntactic bill parsing only and no CGHS business rules.
+Phase 3 implements deterministic internal planning only. No rule writes to the live portal.
 
-- `app (1).py` remains the legacy parser/enhancement baseline and is intentionally untouched.
+## Source policy
+
+- `app (1).py` remains the untouched legacy parser/enhancement baseline.
 - `CGHS_Billing_Suite_Pro.html`, root `main.js`, and root `preload.js` remain untouched references.
-- Phase 2 may identify compound syntax, Patient Payable context, pharmacy/consumable section labels, and Bed Details as source data; it does not assign compound semantics or perform CN002, WC001, ICU, ward, oxygen, rate, pharmacy, consumable, or enhancement calculations.
-- No Selenium, locator, retry, CDP, or portal behavior is copied or changed.
-- The authoritative requirement classifications and undefined rules remain in `PRD.md`.
-- Any future migration requires fixtures and regression tests before legacy behavior is moved or replaced.
+- The embedded 1,998-record HFOS `MASTER_CGHS` snapshot has no verified official filename, effective date, or version. It is loaded as `RATE_SOURCE_UNDEFINED`, not labeled official, and cannot generate financial amounts.
+- Rate-source duplicate conflicts fail explicitly; no version/rate is silently selected.
+- Custom/local entries require code, explicit value, reason, creator, and timestamp. They are `CUSTOM/LOCAL`; source records remain intact, and a colliding code is refused unless audit explicitly sets `override_authoritative: true`.
+
+## Implemented legacy rule ports
+
+| New rule | Legacy source | Deterministic behavior |
+|---|---|---|
+| `CN002_ROOM_BED` | `app (1).py` room-rent parser and CN002 aggregation | ICU evidence row × 3 plus supported ward evidence row × 2 |
+| `CC001_ICU_ROOM_RENT` | `app (1).py` CC001 room-rent derivation | Count applicable ICU evidence rows |
+| `WC001_WARD_ROOM_RENT` | `app (1).py` WC001 room-rent derivation | Count supported ward evidence rows |
+| `CC002_OXYGEN_ROW` | `app (1).py` oxygen handling | HALF DAY/12 hours = 12; FULL DAY/24 hours = 24; unqualified oxygen = legacy 1 |
+
+Structured Bed Details is preferred over duplicate Room Rent text evidence. Supported ICU terms are ICU/CCU/PICU/MICU. Supported ward evidence is AC Multibeds, Single, General Ward, or explicit Ward. HDU and unknown categories are `REVIEW_REQUIRED` because their exact classification is not established. If ambiguous evidence exists, room-derived quantities are withheld rather than guessed.
+
+CC002 requires both C002/CC002 syntax and oxygen service/context evidence. A row containing both HALF and FULL phrases is `REVIEW_REQUIRED`.
+
+## Rejection and exclusion
+
+- Raw CN002 is `REJECTED_BY_RULE`; final quantity derives from Room Rent/Bed evidence.
+- Raw CC001/WC001 is `REJECTED_BY_RULE`; final quantity derives from required context.
+- Raw C002/CC002 is not directly counted; qualifying oxygen rows are evaluated by the CC002 rule and non-oxygen rows are rejected.
+- Patient Payable sections/items remain `EXCLUDED_BY_SECTION` and never enter direct candidates or special rules.
+- Unknown, malformed, unresolved compound, missing-rate, and source-undefined states remain explicit in the plan.
+
+## Compound policy
+
+Phase 3 consumes Phase 2 compound components. It may look up each syntactic base token, but does not assign meaning to `+L`, combine component rates, or turn the expression into an authoritative code. Such expressions remain `UNRESOLVED_COMPOUND` / `RULE_UNDEFINED` with raw text and component results preserved.
+
+## Prohibited scope
+
+No Selenium, locator, retry, CDP, portal, final-composition, pharmacy/consumable attachment, AI decision, or Settlement/Reconciliation behavior is implemented or changed. Settlement remains isolated under `src/services/settlement/`.

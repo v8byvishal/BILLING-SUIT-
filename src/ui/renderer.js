@@ -2,6 +2,34 @@
 
 function text(id, value) { document.getElementById(id).textContent = value; }
 
+function displayNumber(value) { return value == null ? '—' : String(value); }
+
+function renderPlan(plan) {
+  const view = document.getElementById('planView');
+  const rows = document.getElementById('planRows');
+  rows.replaceChildren();
+  for (const entry of plan.entries) {
+    const row = document.createElement('tr');
+    const values = [
+      entry.code,
+      displayNumber(entry.quantity),
+      displayNumber(entry.rate),
+      displayNumber(entry.amount),
+      entry.rule_id || entry.source,
+      entry.status
+    ];
+    for (const value of values) {
+      const cell = document.createElement('td');
+      cell.textContent = value || '—';
+      row.appendChild(cell);
+    }
+    rows.appendChild(row);
+  }
+  text('rateSource', `${plan.rate_source.source_kind} · ${plan.rate_source.authority_status} · ${plan.rate_source.record_count} records`);
+  text('planWarning', plan.warnings.length ? plan.warnings.join(', ') : 'Source verified');
+  view.hidden = false;
+}
+
 async function selectAndParseBill() {
   const button = document.getElementById('selectBill');
   const resultPanel = document.getElementById('parseResult');
@@ -23,7 +51,8 @@ async function selectAndParseBill() {
     text('parsedPages', bill.metadata.page_count);
     text('parsedItems', primaryItems);
     text('excludedSections', bill.excluded_sections.length);
-    text('parseMessage', `${bill.sections.length} primary section(s), ${bill.parsing_audit.compound_expressions.length} compound expression(s), ${bill.bed_details.length} Bed Detail row(s). Review is required; no CGHS calculations were performed.`);
+    text('parseMessage', `${bill.sections.length} primary section(s), ${bill.parsing_audit.compound_expressions.length} compound expression(s), ${bill.bed_details.length} Bed Detail row(s), ${result.enhancementPlan.entries.length} plan entry/entries. No portal operation was performed.`);
+    renderPlan(result.enhancementPlan);
     text('appState', 'BILL_LOADED');
   } catch (error) {
     text('parseStatus', 'ERROR');

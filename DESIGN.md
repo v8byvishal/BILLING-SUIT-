@@ -1,6 +1,6 @@
 # CGHS Billing Suite VNEXT — Design Foundation
 
-Phase 1 provides only an application-readiness screen.
+Phase 3 provides a minimal local bill-selection, parse-status, and deterministic plan-inspection screen.
 
 ## Principles
 
@@ -12,6 +12,6 @@ Phase 1 provides only an application-readiness screen.
 
 ## Current shell
 
-The shell displays product identity, application/Storage/environment readiness, version, resolved Storage path, and four explicitly inactive future workflow areas. It contains no bill controls, portal actions, code tables, or fake completed workflows.
+The shell displays product identity, application/Storage/environment readiness, version, resolved Storage path, PDF selection/status, and a compact read-only EnhancementPlan table. The table shows code, quantity, reference/authoritative rate evidence, amount when permitted, derivation source/rule, and categorical status. It visibly labels the bundled rate snapshot `RATE_SOURCE_UNDEFINED`.
 
-Detailed workflow screens, typography, and final bill presentation remain later design work governed by `PRD.md`.
+It contains no portal controls, custom-rate administration, settlement workflow, or fake completed enhancement. Detailed workflow screens, typography, and final bill presentation remain later design work governed by `PRD.md`.

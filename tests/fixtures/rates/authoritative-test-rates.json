@@ -1,0 +1,21 @@
+{
+  "metadata": {
+    "source_filename": "authoritative-test-rates.json",
+    "source_kind": "TEST_ONLY_AUTHORITY",
+    "authority_status": "AUTHORITATIVE",
+    "version": "test-1",
+    "effective_date": "2026-09-26",
+    "record_count": 8,
+    "notes": "Synthetic deterministic unit-test source; not CGHS production authority."
+  },
+  "records": [
+    {"code":"CN002","description":"Test inpatient consultation","rate":350,"category":"TEST","aliases":[]},
+    {"code":"CC001","description":"Test ICU","rate":5400,"category":"TEST","aliases":[]},
+    {"code":"WC001","description":"Test ward","rate":1000,"category":"TEST","aliases":[]},
+    {"code":"CC002","description":"Test oxygen","rate":90,"category":"TEST","aliases":[]},
+    {"code":"LB126","description":"Test ferritin","rate":315,"category":"TEST","aliases":[]},
+    {"code":"B068","description":"Compound component fixture","rate":10,"category":"TEST","aliases":[]},
+    {"code":"B075","description":"Compound component fixture","rate":20,"category":"TEST","aliases":[]},
+    {"code":"B126","description":"Compound component fixture","rate":30,"category":"TEST","aliases":[]}
+  ]
+}
