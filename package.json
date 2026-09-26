@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "VNEXT_ENV=development electron .",
-    "test": "node --test tests/unit/*.test.js tests/integration/*.test.js",
+    "test": "node scripts/run-unit-tests.js",
     "test:desktop": "node scripts/smoke-test.js",
     "test:real-bills": "node scripts/real-bill-regression.js",
     "test:all": "npm test && npm run test:desktop",
