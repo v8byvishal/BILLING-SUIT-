@@ -85,7 +85,7 @@ app.whenReady().then(() => setTimeout(async () => {
 
     // update architecture
     const upd = await E(`desktop.checkForUpdates()`);
-    t('update architecture prepared, online disabled', upd && upd.online === false && upd.current === '5.0.0-rc.1');
+    t('update architecture prepared, online disabled', upd && upd.online === false && upd.current === '5.0.0-rc.2');
 
     // desktop card renders in Security view
     await E(`switchView('security'); true;`);

@@ -15,10 +15,10 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $RepoRoot
 $required = @('package.json','package-lock.json','app (1).py','src/adapters/legacy-portal/portal_bridge.py','src/adapters/legacy-portal/portal_execution_core.py','packaging/portal-executor.spec','packaging/requirements-executor.txt','scripts/generate-release-manifest.js','scripts/verify-release.js')
 foreach($item in $required){ if(-not (Test-Path -LiteralPath (Join-Path $RepoRoot $item))){ Fail 'REQUIRED_SOURCE_MISSING' $item } }
-Require-Command 'git' 'MISSING_GIT'; Require-Command 'node' 'MISSING_NODE'; Require-Command 'npm' 'MISSING_NPM'; Require-Command 'py' 'MISSING_PYTHON'
+Require-Command 'git' 'MISSING_GIT'; Require-Command 'node' 'MISSING_NODE'; Require-Command 'npm' 'MISSING_NPM'; Require-Command 'python' 'MISSING_PYTHON'
 $nodeVersion = (& node --version).Trim(); $nodeMajor=[int](($nodeVersion -replace '^v','').Split('.')[0]); if($nodeMajor -lt 20){ Fail 'TOOLCHAIN_VERSION_MISMATCH' "Node 20+ required; found $nodeVersion" }
-$npmVersion=(& npm --version).Trim(); $pythonVersion=(& py -3 --version 2>&1).ToString().Trim(); if($pythonVersion -notmatch 'Python 3\.(10|11|12)\.'){ Fail 'TOOLCHAIN_VERSION_MISMATCH' "Python 3.10-3.12 required; found $pythonVersion" }
-& py -3 -m pip --version *> $null; if($LASTEXITCODE -ne 0){ Fail 'MISSING_PIP' 'Python pip is unavailable' }
+$npmVersion=(& npm --version).Trim(); $pythonVersion=(& python --version 2>&1).ToString().Trim(); if($pythonVersion -notmatch 'Python 3\.(10|11|12)\.'){ Fail 'TOOLCHAIN_VERSION_MISMATCH' "Python 3.10-3.12 required; found $pythonVersion" }
+& python -m pip --version *> $null; if($LASTEXITCODE -ne 0){ Fail 'MISSING_PIP' 'Python pip is unavailable' }
 $package=Get-Content package.json -Raw | ConvertFrom-Json
 foreach($name in @('build:python:win','build:win','release:manifest','release:verify')){ if(-not $package.scripts.PSObject.Properties[$name]){ Fail 'REQUIRED_SCRIPT_MISSING' $name } }
 $storageNames=@('Storage','Cases','Bills','Inbox','Custom_Codes','Audit'); foreach($name in $storageNames){ if((Join-Path $RepoRoot $name) -in @((Join-Path $RepoRoot 'dist'),(Join-Path $RepoRoot 'release'),(Join-Path $RepoRoot 'build-resources'))){ Fail 'UNSAFE_CLEAN_TARGET' $name } }
@@ -26,9 +26,9 @@ $releaseDir=Join-Path $RepoRoot 'release'; New-Item -ItemType Directory -Force -
 if(-not $SkipClean){ foreach($relative in @('dist','release','build-resources/python-executor')){ $target=Join-Path $RepoRoot $relative; if(Test-Path $target){ Remove-Item -LiteralPath $target -Recurse -Force } }; New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null }
 $commit=(& git rev-parse HEAD).Trim(); $windowsVersion=[Environment]::OSVersion.VersionString
 Invoke-Gate 'NPM_CI' { npm ci }
-Invoke-Gate 'PYTHON_DEPENDENCIES' { py -3 -m pip install -r packaging/requirements-executor.txt }
-$pyInstallerVersion=(& py -3 -m PyInstaller --version).Trim(); if(-not $pyInstallerVersion){ Fail 'TOOLCHAIN_VERSION_MISMATCH' 'PyInstaller unavailable after dependency installation' }
-if(-not $SkipTests){ Invoke-Gate 'TEST_GATE' { npm test }; Invoke-Gate 'PYTHON_TEST_GATE' { py -3 -m unittest discover -s tests/python } } else { Write-Host 'TEST GATE = SKIPPED BY EXPLICIT OPERATOR SWITCH' }
+Invoke-Gate 'PYTHON_DEPENDENCIES' { python -m pip install -r packaging/requirements-executor.txt }
+$pyInstallerVersion=(& python -m PyInstaller --version).Trim(); if(-not $pyInstallerVersion){ Fail 'TOOLCHAIN_VERSION_MISMATCH' 'PyInstaller unavailable after dependency installation' }
+if(-not $SkipTests){ Invoke-Gate 'TEST_GATE' { npm test }; Invoke-Gate 'PYTHON_TEST_GATE' { python -m unittest discover -s tests/python } } else { Write-Host 'TEST GATE = SKIPPED BY EXPLICIT OPERATOR SWITCH' }
 Invoke-Gate 'PYTHON_EXECUTOR_BUILD' { npm run build:python:win }
 $executor=Join-Path $RepoRoot 'build-resources/python-executor/portal-executor.exe'; if(-not (Test-Path $executor) -or (Get-Item $executor).Length -le 0){ Fail 'PYTHON_EXECUTOR_UNAVAILABLE' $executor }
 $executorHash=(Get-FileHash $executor -Algorithm SHA256).Hash.ToLowerInvariant()
