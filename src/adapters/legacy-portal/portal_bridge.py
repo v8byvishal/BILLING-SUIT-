@@ -43,7 +43,7 @@ def validate_request(request):
 
 
 def main():
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    repo_root = getattr(sys, "_MEIPASS", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
     try:
         request = json.load(sys.stdin)
         validate_request(request)

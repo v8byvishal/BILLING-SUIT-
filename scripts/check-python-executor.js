@@ -1,0 +1,1 @@
+'use strict';const fs=require('node:fs');const p='build-resources/python-executor/portal-executor.exe';if(!fs.existsSync(p))throw Error(`PYTHON_EXECUTOR_UNAVAILABLE: ${p}. Run npm run build:python:win on Windows first.`);console.log(`Using packaged executor ${p}`);

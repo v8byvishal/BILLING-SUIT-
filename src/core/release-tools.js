@@ -1,0 +1,4 @@
+'use strict';const fs=require('node:fs');const path=require('node:path');const crypto=require('node:crypto');
+function fileSha256(file){return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
+function createReleaseManifest({buildInfo,artifacts,outputDir,clock=()=>new Date()}){const records=artifacts.map(file=>({filename:path.basename(file),sha256:fileSha256(file),bytes:fs.statSync(file).size,package_format:'WINDOWS_PORTABLE_EXE'}));const manifest={schema_version:1,...buildInfo,artifacts:records,generated_at:clock().toISOString()};fs.mkdirSync(outputDir,{recursive:true});fs.writeFileSync(path.join(outputDir,'release-manifest.json'),`${JSON.stringify(manifest,null,2)}\n`);fs.writeFileSync(path.join(outputDir,'SHA256SUMS.txt'),records.map(a=>`${a.sha256}  ${a.filename}`).join('\n')+'\n');return manifest;}
+module.exports={fileSha256,createReleaseManifest};

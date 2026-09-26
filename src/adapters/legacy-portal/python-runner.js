@@ -1,42 +1,8 @@
 'use strict';
-
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-
-class LegacyPythonRunner {
-  constructor(options = {}) {
-    this.python = options.python || process.env.VNEXT_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
-    this.script = options.script || path.join(__dirname, 'portal_bridge.py');
-    this.cwd = options.cwd || path.resolve(__dirname, '..', '..', '..');
-    this.timeoutMs = options.timeoutMs || 30 * 60 * 1000;
-  }
-
-  execute(request) {
-    return new Promise((resolve, reject) => {
-      const child = spawn(this.python, [this.script], { cwd: this.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-      let stdout = '';
-      let stderr = '';
-      const timer = setTimeout(() => {
-        child.kill();
-        reject(new Error('Legacy portal executor timed out'));
-      }, this.timeoutMs);
-      child.stdout.on('data', (chunk) => { stdout += chunk; });
-      child.stderr.on('data', (chunk) => { stderr += chunk; });
-      child.on('error', (error) => { clearTimeout(timer); reject(new Error(`Unable to start legacy Python executor: ${error.message}`)); });
-      child.on('exit', (code) => {
-        clearTimeout(timer);
-        const marker = stdout.split(/\r?\n/).reverse().find((line) => line.startsWith('VNEXT_RESULT='));
-        if (!marker) return reject(new Error(`Legacy executor returned no structured result (exit ${code}): ${stderr || stdout}`));
-        try {
-          const result = JSON.parse(marker.slice('VNEXT_RESULT='.length));
-          result.executor_log = stdout.split(/\r?\n/).filter((line) => line && !line.startsWith('VNEXT_RESULT='));
-          result.executor_stderr = stderr || null;
-          resolve(result);
-        } catch (error) { reject(new Error(`Invalid legacy executor result: ${error.message}`)); }
-      });
-      child.stdin.end(JSON.stringify(request));
-    });
-  }
+const path=require('node:path');const fs=require('node:fs');const {spawn}=require('node:child_process');const {resolveRuntimePaths,executorReadiness}=require('../../core/runtime-paths');
+class LegacyPythonRunner{
+ constructor(options={}){this.packaged=options.packaged??process.env.VNEXT_PACKAGED==='1';this.paths=options.paths||resolveRuntimePaths({appDir:path.resolve(__dirname,'..','..','..'),resourcesPath:options.resourcesPath||process.resourcesPath||path.resolve(__dirname,'..','..','..'),packaged:this.packaged,platform:options.platform||process.platform});this.python=options.python||process.env.VNEXT_PYTHON||(process.platform==='win32'?'python':'python3');this.timeoutMs=options.timeoutMs||30*60*1000;this.spawn=options.spawn||spawn;}
+ readiness(){return executorReadiness(this.paths,{packaged:this.packaged});}
+ execute(request){return new Promise((resolve,reject)=>{const readiness=this.readiness();if(!readiness.ready)return reject(Object.assign(new Error(`PYTHON_EXECUTOR_UNAVAILABLE: ${readiness.reason}`),{code:'PYTHON_EXECUTOR_UNAVAILABLE'}));const command=this.packaged?this.paths.pythonExecutor:this.python,args=this.packaged?[]:[this.paths.pythonBridge],cwd=this.packaged?path.dirname(command):path.resolve(__dirname,'..','..','..');let settled=false,child;try{child=this.spawn(command,args,{cwd,stdio:['pipe','pipe','pipe'],windowsHide:true,shell:false});}catch(error){return reject(Object.assign(new Error(`PYTHON_EXECUTOR_ERROR: ${error.message}`),{code:'PYTHON_EXECUTOR_ERROR'}));}let stdout='',stderr='';const finish=(fn,value)=>{if(settled)return;settled=true;clearTimeout(timer);fn(value);};const timer=setTimeout(()=>{child.kill();finish(reject,Object.assign(new Error('PYTHON_EXECUTOR_ERROR: executor timed out'),{code:'PYTHON_EXECUTOR_ERROR'}));},this.timeoutMs);child.stdout.on('data',c=>{stdout+=c});child.stderr.on('data',c=>{stderr+=c});child.on('error',e=>finish(reject,Object.assign(new Error(`PYTHON_EXECUTOR_ERROR: ${e.message}`),{code:'PYTHON_EXECUTOR_ERROR'})));child.on('exit',code=>{if(settled)return;const marker=stdout.split(/\r?\n/).reverse().find(line=>line.startsWith('VNEXT_RESULT='));if(!marker)return finish(reject,Object.assign(new Error(`PYTHON_EXECUTOR_ERROR: no structured result (exit ${code}): ${stderr||stdout}`),{code:'PYTHON_EXECUTOR_ERROR'}));try{const result=JSON.parse(marker.slice(13));result.executor_log=stdout.split(/\r?\n/).filter(line=>line&&!line.startsWith('VNEXT_RESULT='));result.executor_stderr=stderr||null;finish(resolve,result);}catch(e){finish(reject,Object.assign(new Error(`PYTHON_EXECUTOR_ERROR: invalid result: ${e.message}`),{code:'PYTHON_EXECUTOR_ERROR'}));}});child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify(request));});}
 }
-
-module.exports = { LegacyPythonRunner };
+module.exports={LegacyPythonRunner};

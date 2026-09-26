@@ -14,7 +14,12 @@
     "test:real-bills": "node scripts/real-bill-regression.js",
     "test:all": "npm test && npm run test:desktop",
     "build:dir": "electron-builder --dir",
-    "build:win": "electron-builder --win portable"
+    "build:win": "npm run build:identity && node scripts/check-python-executor.js && electron-builder --win portable --x64",
+    "build:identity": "node scripts/generate-build-info.js",
+    "build:python:win": "pyinstaller --clean --noconfirm packaging/portal-executor.spec && node -e \"require('fs').mkdirSync('build-resources/python-executor',{recursive:true});require('fs').copyFileSync('dist/portal-executor.exe','build-resources/python-executor/portal-executor.exe')\"",
+    "release:manifest": "node scripts/generate-release-manifest.js",
+    "release:verify": "node scripts/verify-release.js",
+    "release:win": "npm run build:win && npm run release:manifest && npm run release:verify"
   },
   "dependencies": {
     "pdfjs-dist": "4.10.38",
@@ -44,6 +49,23 @@
         "portable"
       ],
       "artifactName": "CGHS-Billing-Suite-VNEXT-${version}-${arch}.${ext}"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "config/default.json",
+        "to": "config/default.json"
+      },
+      {
+        "from": "build-resources/build-info.json",
+        "to": "build-info.json"
+      },
+      {
+        "from": "build-resources/python-executor",
+        "to": "python-executor",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

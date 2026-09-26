@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const { loadConfig } = require('../core/config');
+const { ensureUserConfig, CURRENT_SCHEMA_VERSION } = require('../core/user-config');
+const { resolveRuntimePaths } = require('../core/runtime-paths');
 const { createLogger } = require('../core/logger');
 const { createAppState } = require('../core/app-state');
 const { ensureStorage, resolveStoragePath } = require('../core/storage');
@@ -158,7 +160,7 @@ function registerIpc() {
     caseWorkflow.beginPortal(currentCaseId);
     logger.info('Case portal execution started; authenticated Chrome CDP session is required', { caseId: currentCaseId });
     try {
-      const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner(), { registrySnapshot: customCodeRegistry.snapshot() });
+      const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner({packaged:app.isPackaged,resourcesPath:process.resourcesPath}), { registrySnapshot: customCodeRegistry.snapshot() });
       currentExecutionAudit = audit; caseWorkflow.recordPortalResult(currentCaseId, audit);currentProductionValidationRun=productionValidationService.recordPortal(currentProductionValidationRun,audit);
       logger.info('Case portal execution finished', { caseId: currentCaseId, runId: audit.run_id, status: audit.status, counts: audit.counts });
       return audit;
@@ -228,7 +230,11 @@ function surfaceFatal(error) {
 
 async function bootstrap() {
   try {
-    config = loadConfig({ appDir: APP_DIR });
+    const runtimePaths=resolveRuntimePaths({appDir:APP_DIR,resourcesPath:process.resourcesPath,packaged:app.isPackaged,platform:process.platform});
+    const bundledDefaults=JSON.parse(fs.readFileSync(runtimePaths.defaultConfig,'utf8'));
+    const userConfigPath=path.join(app.getPath('userData'),'config.json');
+    const userConfig=ensureUserConfig(userConfigPath,bundledDefaults);
+    config = loadConfig({ appDir: APP_DIR, configFile:userConfigPath, rawConfig:userConfig.value });
     const storagePath = resolveStoragePath({
       configuredPath: config.storagePath,
       documentsPath: app.getPath('documents'),

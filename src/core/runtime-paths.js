@@ -1,0 +1,5 @@
+'use strict';
+const fs=require('node:fs');const path=require('node:path');
+function resolveRuntimePaths({appDir,resourcesPath,packaged=false,platform=process.platform}){const bundle=packaged?path.resolve(resourcesPath):path.resolve(appDir);const executorName=platform==='win32'?'portal-executor.exe':'portal-executor';return Object.freeze({bundleRoot:bundle,defaultConfig:path.join(bundle,'config','default.json'),pythonExecutor:path.join(bundle,'python-executor',executorName),pythonBridge:path.join(bundle,'src','adapters','legacy-portal','portal_bridge.py')});}
+function executorReadiness(paths,{packaged=false}={}){if(packaged){if(!fs.existsSync(paths.pythonExecutor))return{ready:false,status:'PYTHON_EXECUTOR_UNAVAILABLE',reason:`Packaged executor not found: ${paths.pythonExecutor}`};return{ready:true,status:'READY',executable:paths.pythonExecutor};}if(!fs.existsSync(paths.pythonBridge))return{ready:false,status:'PYTHON_EXECUTOR_UNAVAILABLE',reason:`Bridge not found: ${paths.pythonBridge}`};return{ready:true,status:'READY',script:paths.pythonBridge};}
+module.exports={resolveRuntimePaths,executorReadiness};

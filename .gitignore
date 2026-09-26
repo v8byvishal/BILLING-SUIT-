@@ -3,6 +3,7 @@ release/
 dist/
 out/
 coverage/
+build-resources/
 *.log
 .DS_Store
 
