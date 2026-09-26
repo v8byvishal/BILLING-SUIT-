@@ -24,8 +24,8 @@ jobs:
           Get-Content build-log.txt
           Write-Host "EXIT_CODE=$code"
           exit $code
-      - name: TEMP diagnostics on failure
-        if: failure()
+      - name: TEMP diagnostics (always)
+        if: always()
         shell: powershell
         run: |
           git config user.email "ci-diagnostics@example.com"
@@ -34,7 +34,16 @@ jobs:
           git checkout -B ci-diagnostics-$env:GITHUB_RUN_ID
           New-Item -ItemType Directory -Force -Path ci-diagnostics | Out-Null
           if (Test-Path build-log.txt) { Copy-Item build-log.txt ci-diagnostics/build-log.txt -Force }
-          if (Test-Path release) { Copy-Item -Recurse release ci-diagnostics/release -Force -ErrorAction SilentlyContinue }
+          foreach ($f in @('release-manifest.json','SHA256SUMS.txt','WINDOWS_RELEASE_ACCEPTANCE.txt')) {
+            $src = Join-Path 'release' $f
+            if (Test-Path $src) { Copy-Item $src (Join-Path 'ci-diagnostics' $f) -Force }
+          }
+          if (Test-Path release) {
+            Get-ChildItem release -Recurse -File | Select-Object Name, Length, @{n='SHA256';e={(Get-FileHash $_.FullName -Algorithm SHA256).Hash}} | Format-Table -AutoSize | Out-String -Width 4096 | Set-Content ci-diagnostics/release-listing.txt
+          }
+          if (Test-Path build-resources/python-executor) {
+            Get-ChildItem build-resources/python-executor -Recurse -File | Select-Object Name, Length, @{n='SHA256';e={(Get-FileHash $_.FullName -Algorithm SHA256).Hash}} | Format-Table -AutoSize | Out-String -Width 4096 | Set-Content ci-diagnostics/executor-listing.txt
+          }
           git add -f ci-diagnostics
           git commit -m "ci: diagnostics for run $env:GITHUB_RUN_ID" --allow-empty
           git push "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git" HEAD:refs/heads/ci-diagnostics-$env:GITHUB_RUN_ID --force
