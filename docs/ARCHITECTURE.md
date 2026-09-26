@@ -1,6 +1,6 @@
-# Architecture — Phase 2 External Storage Foundation
+# Architecture — Phase 3 Source PDF Ingestion and Parser Evidence
 
-CGHS Billing & Enhancement Suite V2 remains a local vanilla Electron/JavaScript desktop application. Phase 2 adds a production-grade external runtime data layer without changing validated parser, CGHS, final-bill, portal, Selenium/CDP, or Python executor behavior.
+CGHS Billing & Enhancement Suite V2 remains a local vanilla Electron/JavaScript desktop application. Phase 3 adds source PDF ingestion and parser evidence extraction on top of the Phase 2 external Storage foundation.
 
 ## Runtime boundary
 
@@ -8,150 +8,121 @@ CGHS Billing & Enhancement Suite V2 remains a local vanilla Electron/JavaScript 
 Renderer UI
   ↓ window.cghsSuite only
 Preload bridge
-  ↓ cghs-suite:operation IPC contract
+  ↓ cghs-suite IPC contract
 Electron main process
   ↓ controlled service calls
 StorageService
-  ↓ external Storage root outside app package
-Existing Node domain services and adapters
+  ↓ immutable source artifact
+Source parser
+  ↓ parse-result evidence JSON
+Existing domain services and adapters
 ```
 
-Renderer code must not access arbitrary filesystem APIs, child processes, Python, Selenium, Storage folder manipulation, or CGHS rule logic. Storage access is mediated by main-process handlers and `StorageService`.
+Renderer code must not access arbitrary filesystem APIs, child processes, Python, Selenium, Storage folder manipulation, source PDF bytes, or CGHS rule logic.
 
-## Authoritative storage abstraction
+## Source lifecycle
 
-`src/core/storage.js` is the single authoritative runtime storage abstraction. It exports `StorageService` plus compatibility functions used by older tests/services.
+1. Operator selects a PDF.
+2. Main process imports it through `StorageService.importSourceBill()`.
+3. StorageService writes `Storage/Source_Bills/<billSessionId>/source.pdf` and `metadata.json`.
+4. Parser reads the stored immutable copy, not a transient developer-relative file.
+5. Parser writes `parse-result.json` next to the source artifact.
+6. Audit/failure records are written under `Storage/Audit` and `Storage/Failures`.
+7. UI reads summaries and parse result through controlled IPC.
 
-Core responsibilities:
+## Parser service
 
-- `resolveRoot()`
-- `initialize()`
-- `healthCheck()`
-- `ensureDirectories()`
-- `getStatus()`
-- `writeFile()` / `readFile()`
-- `moveFile()` / `copyFile()`
-- `deleteTempFile()`
-- `writeJson()` / `readJson()`
-- `appendAudit()`
-- `appendFailure()`
-- `createTempPath()`
-- `openFolder()`
-- `getUsageSummary()`
-- `importSourceBill()`
-- `getSourceBillRecord()` / `listSourceBills()`
-- `writeBillSession()` / `readBillSession()` / `listBillSessions()`
-- `ensureFinalBillPlaceholder()` / `storeFinalBillFile()`
+`src/services/bill-ingestion/source-parser.js` owns the Phase 3 parser pipeline:
 
-## Root resolution
+- PDF validation/open through existing `pdf-loader.js` / `pdfjs-dist`;
+- page model creation;
+- conservative text normalization;
+- section detection;
+- parenthesized `Description (CODE)` candidate extraction;
+- source-derived quantity extraction;
+- evidence/provenance capture;
+- status timeline and parser metrics;
+- stored-source parsing helper.
 
-Default root:
+Parser version: `3.0.0`.
+
+## Page model
+
+```json
+{
+  "pageNumber": 1,
+  "rawText": "...",
+  "normalizedText": "...",
+  "extractionStatus": "OK"
+}
+```
+
+Pages are not silently omitted on successful extraction.
+
+## Section model
+
+Sections contain:
+
+- `sectionType`
+- `pageStart`
+- `pageEnd`
+- `confidence`
+- `status`
+- `evidence`
+
+Unknown text remains `UNKNOWN_SECTION` and is not force-fit.
+
+## Candidate model
+
+Candidates contain:
+
+- `candidateId`
+- `billSessionId`
+- `runId`
+- `pageNumber`
+- `section`
+- `description`
+- `rawText`
+- `codeRaw`
+- `codeNormalizedCandidate`
+- `quantityRaw`
+- `quantityNormalized`
+- `unit`
+- `evidence`
+- `confidence`
+- `status`
+
+Candidate output is evidence only. It is not an EnhancementPlan and is not executable.
+
+## Regression policy
+
+The parser supports documented parenthesized code layouts, including same-line and wrapped-line `Description (CODE)`. The code pattern is intentionally constrained to avoid false positives such as `(1234)`, `(ABCD)`, and `(C123456)`.
+
+No global alias transform is performed. `C008` remains `C008` in parser evidence.
+
+## Persistence
+
+Parser output is stored at:
 
 ```text
-<ApplicationData>/CGHS-Billing-Suite/Storage
+Storage/Source_Bills/<billSessionId>/parse-result.json
 ```
 
-Electron supplies `<ApplicationData>` through `app.getPath('appData')`. The resolver rejects any root inside the application package.
+It includes parser version, run id, status, page count, candidate count, warnings, pages, sections, candidates, metrics, and status timeline.
 
-## Directory contract
+## Audit/failure behavior
 
-Canonical folders:
+Audit events:
 
-```text
-Storage/Source_Bills
-Storage/Final_Bills
-Storage/Audit
-Storage/Failures
-Storage/Temp
-Storage/Config
-```
+- `SOURCE_BILL_IMPORT`
+- `PDF_PARSE_STARTED`
+- `PDF_PARSE_COMPLETED`
+- `PDF_PARSE_WARNING`
+- `PDF_PARSE_FAILED`
+- `PARSER_ZERO_CANDIDATES`
 
-Compatibility folders retained:
+Failure artifacts are sanitized and do not duplicate full PDFs.
 
-```text
-Storage/Cases
-Storage/Bills
-Storage/Custom_Codes
-Storage/Inbox/Initial
-Storage/Inbox/Final
-Storage/Logs
-Storage/Reports
-Storage/Supporting_Sections
-Storage/Failed
-```
+## Real PDF status
 
-Compatibility folders are non-destructive and remain because current services still consume them.
-
-## Manifest
-
-`Storage/Config/storage-manifest.json` contains:
-
-- `schemaVersion`
-- `product`
-- `createdAt`
-- `lastValidatedAt`
-- `storageRoot`
-- canonical directory presence map
-
-No secrets are stored. Schema versioning supports future migrations.
-
-## Source bill storage
-
-A source import creates:
-
-```text
-Storage/Source_Bills/<billSessionId>/source.pdf
-Storage/Source_Bills/<billSessionId>/metadata.json
-```
-
-Metadata stores import facts only: `billSessionId`, `sourceBillId`, original/stored filename, import timestamp, size, SHA-256, MIME type, and status. Storage does not invent patient names, bill numbers, pages, dates, or parser output.
-
-Duplicate detection uses SHA-256 through `Storage/Config/source-bills-index.json`. Uploading the same bytes again returns `DUPLICATE_SOURCE_BILL` and references the existing artifact.
-
-## Bill-session registry
-
-Each durable session record lives at:
-
-```text
-Storage/Config/bill-sessions/<billSessionId>.json
-```
-
-The registry stores source, plan, final-bill path references and durable status. It does not store renderer memory, window handles, process handles, Selenium/CDP state, browser credentials, cookies, tokens, or auth payloads.
-
-## Audit and failure storage
-
-Audit records are structured JSONL entries in:
-
-```text
-Storage/Audit/audit-YYYY-MM-DD.jsonl
-```
-
-Failure records are structured JSON files in:
-
-```text
-Storage/Failures/<failureId>.json
-```
-
-Both are sanitized and avoid raw environment dumps, credentials, tokens, cookies, or browser-profile secrets.
-
-## Atomic writes and corruption handling
-
-Critical JSON writes use temporary files under `Storage/Temp`, flush/close, then rename to the final path. Invalid JSON is detected and preserved as a `.corrupt-<timestamp>` copy where practical. The original corrupt data is not silently replaced with an empty object.
-
-## Startup recovery
-
-On initialization, StorageService:
-
-1. resolves the root;
-2. ensures canonical and compatibility directories;
-3. cleans stale application-generated temp artifacts only;
-4. checks known metadata files for corruption;
-5. validates/updates the manifest;
-6. migrates legacy Phase 1 settings when needed;
-7. returns a recovery summary.
-
-Historical data is not deleted during recovery.
-
-## UI and diagnostics
-
-The Phase 2 UI shows real storage health, persisted source records, persistent audit history, and actual configured Storage root. Diagnostics include storage root, manifest status, health result, read/write/temp probes, recovery summary, usage summary, and record counts.
+No real hospital-bill PDF fixture is available in this checkout. Phase 3 validation uses synthetic non-PHI PDFs generated by tests and golden expected JSON.

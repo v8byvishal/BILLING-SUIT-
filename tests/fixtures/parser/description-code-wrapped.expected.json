@@ -1,0 +1,13 @@
+{
+  "fixture": "synthetic_description_code_wrapped_regression.pdf",
+  "synthetic": true,
+  "expected": {
+    "status": "COMPLETED",
+    "candidateCountAtLeast": 1,
+    "pageNumber": 1,
+    "section": "PROCEDURES",
+    "descriptionContains": "Blood Transfusion Charge",
+    "codeRaw": "C008",
+    "quantityNormalized": 2
+  }
+}

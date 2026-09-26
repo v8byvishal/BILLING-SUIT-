@@ -610,8 +610,12 @@ class StorageService {
     }
   }
 
+  getSourceBillDirectory(billSessionId) {
+    return this.resolveManagedPath(path.join('Source_Bills', safeName(billSessionId)));
+  }
+
   getSourceBillRecord(billSessionId, options = {}) {
-    const directory = this.resolveManagedPath(path.join('Source_Bills', safeName(billSessionId)));
+    const directory = this.getSourceBillDirectory(billSessionId);
     const metadataFile = path.join(directory, 'metadata.json');
     const loaded = this.readJson(metadataFile, { fallback: null, preserveCorrupt: true });
     if (loaded.status === OPERATION_STATUS.NOT_FOUND) return { status: OPERATION_STATUS.NOT_FOUND, billSessionId, paths: { directory, metadata: metadataFile } };
@@ -625,13 +629,32 @@ class StorageService {
     return { status: OPERATION_STATUS.SUCCESS, metadata, paths: { directory, sourceFile, metadata: metadataFile } };
   }
 
+  writeParseResult(billSessionId, parseResult) {
+    const directory = this.getSourceBillDirectory(billSessionId);
+    fs.mkdirSync(directory, { recursive: true });
+    const file = path.join(directory, 'parse-result.json');
+    this.writeJson(file, parseResult);
+    return { status: OPERATION_STATUS.SUCCESS, path: file, result: parseResult };
+  }
+
+  readParseResult(billSessionId) {
+    const file = path.join(this.getSourceBillDirectory(billSessionId), 'parse-result.json');
+    const loaded = this.readJson(file, { fallback: null, preserveCorrupt: true });
+    if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
+    return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, result: loaded.value };
+  }
+
   listSourceBills(options = {}) {
     const root = this.getFolderPath('Source_Bills');
     if (!fs.existsSync(root)) return [];
     return fs.readdirSync(root, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => this.getSourceBillRecord(entry.name, options))
-      .map((record) => ({ ...record, billSessionId: record.metadata?.billSessionId || record.billSessionId || path.basename(record.paths?.directory || '') }))
+      .map((record) => {
+        const billSessionId = record.metadata?.billSessionId || record.billSessionId || path.basename(record.paths?.directory || '');
+        const parse = billSessionId ? this.readParseResult(billSessionId) : null;
+        return { ...record, billSessionId, parseResult: parse?.status === OPERATION_STATUS.SUCCESS ? { status: parse.result.status, pageCount: parse.result.pageCount, candidateCount: parse.result.candidateCount, runId: parse.result.runId, parserVersion: parse.result.parserVersion } : null };
+      })
       .sort((a, b) => String(b.metadata?.importedAt || '').localeCompare(String(a.metadata?.importedAt || '')));
   }
 

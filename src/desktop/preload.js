@@ -32,6 +32,9 @@ const api = Object.freeze({
     listSourceBills: () => call(OPERATIONS.STORAGE_LIST_SOURCE_BILLS),
     getUsageSummary: () => call(OPERATIONS.STORAGE_GET_USAGE)
   }),
+  sourceBill: Object.freeze({
+    getParseResult: (billSessionId) => call(OPERATIONS.SOURCE_BILL_GET_PARSE_RESULT, { billSessionId })
+  }),
   bill: Object.freeze({
     getCurrent: () => call(OPERATIONS.BILL_GET_CURRENT),
     clearCurrent: () => call(OPERATIONS.BILL_CLEAR_CURRENT),

@@ -1,8 +1,13 @@
 # Architecture
 
-This repository is a local vanilla Electron/JavaScript desktop application. Phase 2 adds an authoritative external runtime persistence layer while preserving existing domain services, parser behavior, CGHS rules, portal adapters, final-bill logic, and the legacy Python/Selenium executor.
+This repository is a local vanilla Electron/JavaScript desktop application. Phase 3 adds source-bill PDF evidence extraction on top of the Phase 2 external Storage layer while preserving existing CGHS rule, portal, final-bill, and legacy Python/Selenium behavior.
 
-For detailed Phase 2 storage architecture, see `docs/ARCHITECTURE.md`, `docs/PHASE_02_IMPLEMENTATION.md`, and `docs/STORAGE_MIGRATION.md`.
+Detailed storage/parser documentation:
+
+- `docs/ARCHITECTURE.md`
+- `docs/PARSER_PIPELINE.md`
+- `docs/PARSER_REGRESSION.md`
+- `docs/PHASE_03_IMPLEMENTATION.md`
 
 ## Runtime layering
 
@@ -15,12 +20,14 @@ Electron main process (src/desktop/main.js)
   ↓ service orchestration
 StorageService (src/core/storage.js)
   ↓ external Storage root outside application package
-Node domain services and adapters
+Source parser (src/services/bill-ingestion/source-parser.js)
+  ↓ parser evidence output only
+Existing Node domain services and adapters
   ↓ where already implemented
 Legacy Python/Selenium/CDP portal executor
 ```
 
-The renderer does not directly access Node filesystem APIs, shell commands, Python, Selenium, CGHS rule internals, or arbitrary Storage manipulation. Privileged work must flow through the preload bridge and a declared IPC handler.
+The renderer does not directly access Node filesystem APIs, shell commands, Python, Selenium, CGHS rule internals, source PDFs, or arbitrary Storage manipulation. Privileged work flows through the preload bridge and declared IPC handlers.
 
 ## External Storage root
 
@@ -30,93 +37,80 @@ The canonical default root is resolved from Electron's standard application data
 <ApplicationData>/CGHS-Billing-Suite/Storage
 ```
 
-The resolver rejects paths inside the application package. Operational data must not silently fall back into the repository, Desktop, Downloads, Program Files, or the installed app directory.
+The resolver rejects paths inside the application package. Operational files must not silently fall back into the repository or packaged app directory.
 
-## Canonical Storage contract
-
-```text
-Storage/
-  Source_Bills/
-  Final_Bills/
-  Audit/
-  Failures/
-  Temp/
-  Config/
-```
-
-Compatibility folders remain present for existing services:
+## Source-bill ingestion lifecycle
 
 ```text
-Cases/
-Bills/
-Custom_Codes/
-Inbox/Initial/
-Inbox/Final/
-Logs/
-Reports/
-Supporting_Sections/
-Failed/
+Operator selects PDF
+  -> StorageService.importSourceBill()
+  -> Storage/Source_Bills/<billSessionId>/source.pdf
+  -> parseStoredSourceBill()
+  -> pdfjs-dist extraction
+  -> page model
+  -> normalization
+  -> section detection
+  -> evidence candidates
+  -> Storage/Source_Bills/<billSessionId>/parse-result.json
+  -> Source Bills UI
 ```
 
-These compatibility folders are documented and retained non-destructively until their consumers are migrated in a later controlled phase.
+The stored source artifact is the canonical parser input. Parser output is associated with exactly one `billSessionId` and `runId`.
 
-## StorageService responsibilities
+## Parser contract
 
-`src/core/storage.js` exports `StorageService`, the authoritative runtime persistence abstraction. It owns:
+`src/services/bill-ingestion/source-parser.js` exports parser version `3.0.0` and produces evidence-oriented parse results. Parser output includes:
 
-- root resolution and package-directory rejection;
-- canonical/compatibility directory creation;
-- real health checks with read/write/temp create/remove verification;
-- manifest creation/reload at `Storage/Config/storage-manifest.json`;
-- atomic file/JSON writes through temp + fsync + rename;
-- corruption detection and preservation of invalid JSON artifacts;
-- source bill import under `Storage/Source_Bills/<billSessionId>/`;
-- SHA-256 and size integrity checks;
-- duplicate source detection by SHA-256;
-- bill-session registry under `Storage/Config/bill-sessions/`;
-- final bill placeholder/storage mechanism under `Storage/Final_Bills/<billSessionId>/`;
-- structured audit/failure records;
-- application-generated temp cleanup and startup recovery summaries;
-- allowlisted folder opening and on-demand usage summaries.
+- pages with `rawText`, `normalizedText`, and extraction status;
+- sections with type, page range, status, confidence, and evidence;
+- candidates with description, raw code, normalized candidate code, quantity evidence, and provenance;
+- warnings, metrics, and status timeline.
 
-## Persistent records
+The parser does not produce executable portal actions and does not apply CGHS business-rule normalization.
 
-### Source bill
+## Description (CODE) regression
 
-`Storage/Source_Bills/<billSessionId>/metadata.json` stores only import facts: schema version, session/source id, original filename, stored filename, import time, file size, SHA-256, MIME type, and import status. Parser-derived patient, bill, date, page, and section information is not fabricated by storage.
+Phase 3 fixes the parser evidence gap for parenthesized code patterns such as:
 
-### Bill session
+```text
+Blood Transfusion Charge (C008)
+Blood Transfusion Charge
+(C008)
+```
 
-`Storage/Config/bill-sessions/<billSessionId>.json` stores source/final/plan paths and durable workflow status. It does not store renderer state, BrowserWindow objects, Selenium handles, process handles, credentials, cookies, or tokens.
+The parser preserves `C008` as `C008`; it does not map aliases or convert to `CC008`.
 
-### Audit and failure
+## Storage contract
 
-Audit records are JSON lines in `Storage/Audit/audit-YYYY-MM-DD.jsonl`. Failure records are JSON files in `Storage/Failures/`. Messages and diagnostic fields are sanitized to avoid secrets.
+Canonical folders remain:
 
-## Status semantics
+```text
+Storage/Source_Bills
+Storage/Final_Bills
+Storage/Audit
+Storage/Failures
+Storage/Temp
+Storage/Config
+```
 
-Storage health uses explicit statuses:
+Source parser results live beside the source artifact:
 
-- `NOT_INITIALIZED`
-- `INITIALIZING`
-- `READY`
-- `READ_ONLY`
-- `ACCESS_ERROR`
-- `CORRUPT`
-- `ERROR`
-
-Operational outcomes distinguish `SUCCESS`, `DUPLICATE`, `DUPLICATE_SOURCE_BILL`, `NOT_FOUND`, `INVALID`, `CORRUPT`, `READ_ONLY`, `ACCESS_ERROR`, and `IO_ERROR` rather than collapsing failures to `false`, `null`, or empty arrays.
+```text
+Storage/Source_Bills/<billSessionId>/source.pdf
+Storage/Source_Bills/<billSessionId>/metadata.json
+Storage/Source_Bills/<billSessionId>/parse-result.json
+```
 
 ## IPC and preload policy
 
-The Phase 2 IPC channel remains controlled by `src/desktop/ipc-contract.js`. Storage operations added in Phase 2 include source-record listing and usage summary. Folder opening is allowlisted by folder key; there is no generic shell execution API.
+The Phase 3 IPC contract adds controlled parse-result access through `sourceBill.getParseResult`. Folder opening remains allowlisted by folder key. There is no generic shell execution, arbitrary Python execution, arbitrary Node execution, JavaScript eval, unrestricted filesystem access, or credential storage.
 
 ## Preserved business boundaries
 
-Phase 2 does not change:
+Phase 3 does not change:
 
 - CGHS mapping/rule semantics;
-- parser semantics;
+- EnhancementPlan business semantics;
 - portal duplicate prevention, portal quantity reconciliation, speciality logic, locked quantity handling, Selenium workflow, or CDP behavior;
 - final-bill business logic;
 - legacy Python executor ownership of browser automation.

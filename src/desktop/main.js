@@ -27,6 +27,7 @@ const { summarizeValidation, validateBill } = require('../services/validation/bi
 const { classifyDiscrepancy, saveValidation } = require('../services/validation/validation-store');
 const { ProductionValidationRunService } = require('../services/validation/production-validation-run');
 const { createDiagnosticsReport, ensureDiagnosticsFolder, writeDiagnosticsReport } = require('../services/diagnostics/diagnostics-service');
+const { parseStoredSourceBill, PARSER_STATUSES } = require('../services/bill-ingestion/source-parser');
 const { OPERATIONS, registerPhase1Ipc } = require('./phase1-ipc');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
@@ -144,58 +145,74 @@ async function selectAndParseSourceBill() {
     const filePath = selection.filePaths[0];
     const importResult = storageService.importSourceBill(filePath, { originalFileName: path.basename(filePath) });
     if (importResult.status === 'DUPLICATE_SOURCE_BILL') {
-      phase1State.appendHistory({ billSessionId: importResult.billSessionId, operation: 'SOURCE_BILL_DUPLICATE', status: 'DUPLICATE_SOURCE_BILL', source_reference: importResult.metadata });
-      return { canceled: false, duplicate: true, duplicateCode: 'DUPLICATE_SOURCE_BILL', billSessionId: importResult.billSessionId, source: importResult.metadata, appState: phase1State.snapshot() };
+      const existingParse = storageService.readParseResult(importResult.billSessionId);
+      const source = { file_path: importResult.paths?.sourceFile || null, file_name: importResult.metadata?.originalFileName || path.basename(filePath), sha256: importResult.metadata?.sha256 || null, source_bill_id: importResult.metadata?.sourceBillId || importResult.billSessionId };
+      const billSessionId = phase1State.startBillSession({
+        billSessionId: importResult.billSessionId,
+        source,
+        metadata: {
+          fileName: source.file_name,
+          sha256: source.sha256,
+          persistedSource: importResult.metadata,
+          parseStatus: existingParse.status === 'SUCCESS' ? existingParse.result.status : 'NOT_STARTED',
+          pageCount: existingParse.result?.pageCount || 0,
+          candidateCount: existingParse.result?.candidateCount || 0
+        }
+      });
+      currentBill = existingParse.status === 'SUCCESS' ? { source, parserResult: existingParse.result } : { source, parserResult: null };
+      state.set('BILL_LOADED');
+      phase1State.appendHistory({ billSessionId, operation: 'SOURCE_BILL_DUPLICATE', status: 'DUPLICATE_SOURCE_BILL', source_reference: importResult.metadata });
+      return { canceled: false, duplicate: true, duplicateCode: 'DUPLICATE_SOURCE_BILL', billSessionId, source: importResult.metadata, parseResult: existingParse.result || null, appState: phase1State.snapshot() };
     }
-    if (importResult.status !== 'IMPORTED') {
-      throw new Error(importResult.message || importResult.code || importResult.status);
-    }
+    if (importResult.status !== 'IMPORTED') throw new Error(importResult.message || importResult.code || importResult.status);
+
+    const billSessionId = importResult.billSessionId;
     const source = {
       file_path: importResult.paths.sourceFile,
       file_name: importResult.metadata.originalFileName,
       sha256: importResult.metadata.sha256,
       source_bill_id: importResult.sourceBillId
     };
-    const result = await caseWorkflow.importInitial(source);
-    if (result.outcome === 'EXACT_DUPLICATE') {
-      storageService.updateBillSession(importResult.billSessionId, { status: 'DUPLICATE_CASE', sourceBillId: importResult.sourceBillId, sourcePath: importResult.paths.sourceFile });
-      storageService.appendAudit({ billSessionId: importResult.billSessionId, operation: 'CASE_DUPLICATE_DETECTED', stage: 'CASE_WORKFLOW', status: 'DUPLICATE', sourceRef: source });
-      phase1State.appendHistory({ billSessionId: importResult.billSessionId, operation: 'SOURCE_BILL_DUPLICATE', status: 'EXACT_DUPLICATE', source_reference: source });
-      return { canceled: false, duplicate: true, duplicateCode: 'EXACT_DUPLICATE_CASE', billSessionId: importResult.billSessionId, case: result.case, source: importResult.metadata, appState: phase1State.snapshot() };
-    }
-    if (!result.bill || !result.plan) throw new Error(result.reason || result.outcome);
-    currentCaseId = result.case.case_id;
-    currentBill = result.bill;
-    currentEnhancementPlan = result.plan;
-    currentExecutionAudit = null;
-    currentFinalBillPath = null;
-    currentCompletedBill = null;
-    currentValidationReport = null;
-    customCodeRegistry.recordPlanUsage(result.plan);
-    state.set('BILL_LOADED');
-    const billSessionId = phase1State.startBillSession({
-      billSessionId: importResult.billSessionId,
-      source,
-      metadata: { ...billMetadataForState(result.bill, result.case), persistedSource: importResult.metadata }
-    });
-    const planPath = result.case.enhancement_plan_reference?.path || null;
-    storageService.updateBillSession(billSessionId, { status: result.case.workflow_status || 'PARSED', sourceBillId: importResult.sourceBillId, sourcePath: importResult.paths.sourceFile, enhancementPlanPath: planPath });
-    phase1State.setEnhancement({
+    phase1State.startBillSession({
       billSessionId,
-      status: enhancementStatusForPlan(result.plan),
-      plan: result.plan,
-      diagnostics: result.plan.warnings || []
+      source,
+      metadata: { fileName: source.file_name, sha256: source.sha256, persistedSource: importResult.metadata, parseStatus: PARSER_STATUSES.READING, pageCount: 0, candidateCount: 0 }
     });
-    storageService.appendAudit({ billSessionId, operation: 'SOURCE_BILL_PARSE', stage: 'BILL_INGESTION', status: 'SUCCESS', sourceRef: { caseId: currentCaseId, sourcePath: importResult.paths.sourceFile } });
-    logger.info('Case initial bill parsed and plan persisted', { caseId: currentCaseId, billSessionId, pages: result.bill.parsing_audit.pages_processed, planEntries: result.plan.entries.length, workflowStatus: result.case.workflow_status });
-    return { canceled: false, billSessionId, source: importResult.metadata, case: result.case, bill: result.bill, enhancementPlan: result.plan, appState: phase1State.snapshot() };
+    const parseResult = await parseStoredSourceBill(storageService, billSessionId);
+    currentBill = { source, parserResult: parseResult };
+    currentEnhancementPlan = null;
+    state.set(parseResult.status === PARSER_STATUSES.FAILED ? 'ERROR' : 'BILL_LOADED');
+    phase1State.setCurrentBillMetadata({
+      fileName: source.file_name,
+      sha256: source.sha256,
+      persistedSource: importResult.metadata,
+      parseStatus: parseResult.status,
+      pages: parseResult.pageCount,
+      pageCount: parseResult.pageCount,
+      candidateCount: parseResult.candidateCount,
+      parserVersion: parseResult.parserVersion,
+      runId: parseResult.runId,
+      warnings: parseResult.warnings || []
+    });
+    phase1State.resetEnhancement({ preserveSession: true });
+    if (parseResult.status === PARSER_STATUSES.FAILED) {
+      phase1State.appendHistory({ billSessionId, operation: 'PDF_PARSE_FAILED', status: 'FAILED', error_code: parseResult.errorCode });
+      throw Object.assign(new Error(parseResult.message || 'Source PDF could not be parsed'), { code: parseResult.errorCode || 'PDF_PARSE_FAILED' });
+    }
+    if (parseResult.status === PARSER_STATUSES.PARSER_COMPLETED_NO_CANDIDATES) {
+      phase1State.appendHistory({ billSessionId, operation: 'PARSER_ZERO_CANDIDATES', status: parseResult.status });
+    } else {
+      phase1State.appendHistory({ billSessionId, operation: 'PDF_PARSE_COMPLETED', status: parseResult.status });
+    }
+    logger.info('Source bill imported and parsed for evidence candidates', { billSessionId, pages: parseResult.pageCount, candidates: parseResult.candidateCount, status: parseResult.status });
+    return { canceled: false, billSessionId, source: importResult.metadata, parseResult, appState: phase1State.snapshot() };
   } catch (error) {
     state.set('ERROR');
     phase1State.setAppStatus(APP_STATUS.ERROR, error.message);
-    phase1State.appendHistory({ operation: 'SOURCE_BILL_PARSE', status: 'FAILED', error_code: error.code || 'APP_INTERNAL_ERROR' });
-    try { storageService?.appendFailure({ stage: 'BILL_INGESTION', code: error.code || 'APP_INTERNAL_ERROR', message: error.message, recoverable: true }); } catch (_) { /* failure persistence is best effort during error handling */ }
-    logger.error('Bill PDF parsing failed', error);
-    throw new Error(`Bill could not be parsed: ${error.message}`);
+    phase1State.appendHistory({ operation: 'PDF_PARSE_FAILED', status: 'FAILED', error_code: error.code || 'PDF_PARSE_FAILED' });
+    try { storageService?.appendFailure({ stage: 'PDF_PARSE', code: error.code || 'PDF_PARSE_FAILED', message: error.message, recoverable: true }); } catch (_) { /* failure persistence is best effort during error handling */ }
+    logger.error('Source PDF ingestion/parsing failed', { message: error.message, code: error.code || null });
+    throw new Error(`Source PDF could not be parsed: ${error.message}`);
   }
 }
 
@@ -240,6 +257,13 @@ function createPhase1Handlers() {
     [OPERATIONS.STORAGE_LIST_RECENT]: () => storageService ? storageService.listBillSessions().slice(0, 10).map((item) => item.session || item) : [],
     [OPERATIONS.STORAGE_LIST_SOURCE_BILLS]: () => storageService ? storageService.listSourceBills({ verifyHash: false }) : [],
     [OPERATIONS.STORAGE_GET_USAGE]: () => storageService ? storageService.getUsageSummary() : null,
+    [OPERATIONS.SOURCE_BILL_GET_PARSE_RESULT]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return null;
+      const result = storageService.readParseResult(billSessionId);
+      if (result.status === 'SUCCESS') return result.result;
+      return { status: result.status, error: result.error || null, billSessionId };
+    },
     [OPERATIONS.BILL_GET_CURRENT]: () => phase1State.snapshot().currentBill,
     [OPERATIONS.BILL_CLEAR_CURRENT]: () => { const billSessionId = phase1State.getCurrentBillSessionId(); clearActiveBillWorkspace(); if (billSessionId) storageService?.appendAudit({ billSessionId, operation: 'CURRENT_BILL_RESET', stage: 'UI', status: 'SUCCESS' }); return phase1State.snapshot().currentBill; },
     [OPERATIONS.BILL_RESET]: () => { const billSessionId = phase1State.getCurrentBillSessionId(); clearActiveBillWorkspace(); if (billSessionId) storageService?.appendAudit({ billSessionId, operation: 'CURRENT_BILL_RESET', stage: 'UI', status: 'SUCCESS' }); return phase1State.snapshot(); },

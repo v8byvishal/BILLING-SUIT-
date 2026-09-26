@@ -26,7 +26,7 @@
         <button class="nav-item" type="button" data-route="settings">Settings</button>
         <button class="nav-item" type="button" data-route="diagnostics">Diagnostics</button>
       </nav>
-      <div class="sidebar-note">Portal readiness is not verified in Phase 1.</div>
+      <div class="sidebar-note">Portal readiness is not verified in Phase 3.</div>
     </aside>
 
     <main class="main">
@@ -88,7 +88,7 @@
             <button id="clearSourceBill" type="button">Clear current bill</button>
             <button id="openSourceFolder" type="button">Open Source_Bills</button>
           </div>
-          <div class="notice">Phase 1 provides the workspace and safe session boundary. Parser behavior is not changed in this phase.</div>
+          <div class="notice">Phase 3 stores the selected PDF, parses the immutable copy, and shows evidence candidates. Business-rule validation is not performed here.</div>
           <dl class="details">
             <div><dt>billSessionId</dt><dd id="sourceSession">NONE</dd></div>
             <div><dt>Filename</dt><dd id="sourceFile">No source bill loaded.</dd></div>
@@ -97,10 +97,24 @@
             <div><dt>Patient / identifiers</dt><dd id="sourceIdentifiers">—</dd></div>
             <div><dt>Detected sections</dt><dd id="sourceSections">—</dd></div>
           </dl>
+          <h3>Parser result</h3>
+          <dl class="details">
+            <div><dt>Parser status</dt><dd id="sourceParseStatus">NOT_STARTED</dd></div>
+            <div><dt>Candidate count</dt><dd id="sourceCandidateCount">0</dd></div>
+            <div><dt>Warnings</dt><dd id="sourceWarnings">—</dd></div>
+          </dl>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Page</th><th>Section</th><th>Description</th><th>Code</th><th>Quantity</th><th>Status</th></tr></thead>
+              <tbody id="candidateRows"></tbody>
+            </table>
+          </div>
+          <h3>Candidate evidence</h3>
+          <pre id="candidateEvidence">Select a parsed candidate to inspect source evidence.</pre>
           <h3>Persisted Source Bills</h3>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Imported</th><th>billSessionId</th><th>Original file</th><th>Status</th><th>SHA-256</th></tr></thead>
+              <thead><tr><th>Imported</th><th>billSessionId</th><th>Original file</th><th>Status</th><th>Parser</th><th>SHA-256</th></tr></thead>
               <tbody id="sourceRecordRows"></tbody>
             </table>
           </div>
@@ -135,7 +149,7 @@
           <div class="subgrid">
             <section><h3>Final Bill Source</h3><p class="empty-text">No final bill PDF loaded.</p></section>
             <section><h3>Extracted Sections</h3><p class="empty-text">No supported final-bill sections extracted.</p></section>
-            <section><h3>Editable Metadata</h3><p class="empty-text">Editable final-bill formatting is not enabled in Phase 1.</p></section>
+            <section><h3>Editable Metadata</h3><p class="empty-text">Editable final-bill formatting is not enabled in Phase 3.</p></section>
             <section><h3>Composition Preview</h3><p class="empty-text">Final bill composition engine is not yet enabled.</p></section>
             <section><h3>Validation</h3><p class="empty-text">No final-bill validation has run.</p></section>
             <section><h3>Output Status</h3><p class="empty-text">No final PDF has been generated.</p></section>

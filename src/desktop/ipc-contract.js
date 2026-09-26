@@ -14,6 +14,7 @@ const OPERATIONS = Object.freeze({
   STORAGE_LIST_RECENT: 'storage.listRecent',
   STORAGE_LIST_SOURCE_BILLS: 'storage.listSourceBills',
   STORAGE_GET_USAGE: 'storage.getUsageSummary',
+  SOURCE_BILL_GET_PARSE_RESULT: 'sourceBill.getParseResult',
   BILL_GET_CURRENT: 'bill.getCurrent',
   BILL_CLEAR_CURRENT: 'bill.clearCurrent',
   BILL_SELECT: 'bill.select',

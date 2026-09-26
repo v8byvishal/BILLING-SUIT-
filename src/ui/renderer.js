@@ -7,7 +7,8 @@ const ui = {
   settings: null,
   sourceRecords: [],
   auditRecords: [],
-  usage: null
+  usage: null,
+  parseResult: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -73,7 +74,7 @@ function renderDashboard() {
   text('dashboardBill', bill.status === 'LOADED' ? `${metadata.fileName || bill.source?.file_name || 'Source bill'} · ${metadata.billNumber || 'Bill number unavailable'}` : 'No source bill loaded.');
   text('dashboardEnhancement', state.enhancement?.plan ? `${state.enhancement.status} · ${state.enhancement.plan.entries?.length || 0} plan entr${state.enhancement.plan.entries?.length === 1 ? 'y' : 'ies'}` : 'No EnhancementPlan available.');
   text('dashboardFinalBill', state.finalBill?.status === 'NOT STARTED' ? 'Final bill workflow has not started.' : state.finalBill?.status);
-  text('nextAction', bill.status === 'LOADED' ? 'Review the Enhancement workspace. Portal readiness remains NOT VERIFIED in Phase 1.' : 'Upload a source bill to begin.');
+  text('nextAction', bill.status === 'LOADED' ? 'Review parsed source evidence. Portal readiness remains NOT VERIFIED in Phase 3.' : 'Upload a source bill to begin.');
 }
 
 function renderSourceBill() {
@@ -82,17 +83,22 @@ function renderSourceBill() {
   text('sourceState', bill.status || 'Empty');
   text('sourceSession', bill.billSessionId || 'NONE');
   text('sourceFile', meta.fileName || bill.source?.file_name || 'No source bill loaded.');
-  text('sourcePages', meta.pages ?? '—');
+  text('sourcePages', meta.pages ?? meta.pageCount ?? ui.parseResult?.pageCount ?? '—');
   text('sourceBillNumber', meta.billNumber || '—');
   text('sourceIdentifiers', [meta.patientName, meta.uhid, meta.ipNumber].filter(Boolean).join(' · ') || '—');
   text('sourceSections', [...(meta.sections || []), ...(meta.excludedSections || []).map((x) => `${x} (excluded)`)].join(', ') || '—');
+  const parse = ui.parseResult || {};
+  text('sourceParseStatus', parse.status || meta.parseStatus || 'NOT_STARTED');
+  text('sourceCandidateCount', parse.candidateCount ?? meta.candidateCount ?? 0);
+  text('sourceWarnings', (parse.warnings || meta.warnings || []).map((warning) => warning.code || warning).join(', ') || '—');
+  renderCandidates(parse.candidates || []);
   const body = $('sourceRecordRows');
   if (body) {
     body.replaceChildren();
     if (!ui.sourceRecords.length) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = 5;
+      cell.colSpan = 6;
       cell.textContent = 'No persisted source bill records found.';
       row.appendChild(cell);
       body.appendChild(row);
@@ -100,7 +106,8 @@ function renderSourceBill() {
       for (const record of ui.sourceRecords) {
         const meta = record.metadata || {};
         const row = document.createElement('tr');
-        for (const value of [meta.importedAt || '—', meta.billSessionId || record.billSessionId || '—', meta.originalFileName || '—', record.status || meta.status || '—', meta.sha256 ? `${meta.sha256.slice(0, 12)}…` : '—']) {
+        const parserSummary = record.parseResult ? `${record.parseResult.status} · ${record.parseResult.candidateCount || 0}` : 'NOT_STARTED';
+        for (const value of [meta.importedAt || '—', meta.billSessionId || record.billSessionId || '—', meta.originalFileName || '—', record.status || meta.status || '—', parserSummary, meta.sha256 ? `${meta.sha256.slice(0, 12)}…` : '—']) {
           const cell = document.createElement('td');
           cell.textContent = value;
           row.appendChild(cell);
@@ -111,12 +118,44 @@ function renderSourceBill() {
   }
 }
 
+function renderCandidates(candidates) {
+  const body = $('candidateRows');
+  if (!body) return;
+  body.replaceChildren();
+  if (!candidates.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 6;
+    cell.textContent = (ui.parseResult?.status === 'PARSER_COMPLETED_NO_CANDIDATES')
+      ? 'PDF parsed successfully, but no candidate enhancement entries were detected.'
+      : 'No parsed candidates available.';
+    row.appendChild(cell);
+    body.appendChild(row);
+    text('candidateEvidence', 'No candidate evidence selected.');
+    return;
+  }
+  for (const candidate of candidates) {
+    const row = document.createElement('tr');
+    row.tabIndex = 0;
+    row.className = 'clickable-row';
+    row.addEventListener('click', () => text('candidateEvidence', JSON.stringify(candidate.evidence || {}, null, 2)));
+    row.addEventListener('keydown', (event) => { if (event.key === 'Enter') row.click(); });
+    for (const value of [candidate.pageNumber, candidate.section, candidate.description || '—', candidate.codeRaw || '—', candidate.quantityRaw || '—', candidate.status]) {
+      const cell = document.createElement('td');
+      cell.textContent = value == null || value === '' ? '—' : String(value);
+      row.appendChild(cell);
+    }
+    body.appendChild(row);
+  }
+  text('candidateEvidence', JSON.stringify(candidates[0].evidence || {}, null, 2));
+}
+
 function renderPlan() {
   const enhancement = activeState().enhancement || {};
   const plan = enhancement.plan;
   text('enhancementState', enhancement.status || 'No plan');
   text('enhancementBill', activeState().currentBill?.billSessionId ? `Active bill session: ${activeState().currentBill.billSessionId}` : 'No source bill is active.');
-  text('executionStatus', 'Portal readiness has not been verified. Live execution is not part of Phase 1 validation.');
+  text('executionStatus', 'Portal readiness has not been verified. Live execution is not part of Phase 3 source parsing.');
   const body = $('planRows');
   body.replaceChildren();
   if (!plan) {
@@ -212,6 +251,7 @@ async function refreshState() {
     ui.settings = settings;
     ui.sourceRecords = sourceRecords;
     ui.auditRecords = auditRecords;
+    ui.parseResult = appState.currentBill?.billSessionId ? await suite().sourceBill.getParseResult(appState.currentBill.billSessionId).catch(() => null) : null;
     renderAll();
   } catch (error) {
     showBanner(safeMessage(error), 'error');
@@ -231,8 +271,8 @@ async function selectBill() {
   try {
     const result = await suite().bill.select();
     if (result.canceled) showBanner('No PDF selected.', 'info');
-    else if (result.duplicate) showBanner(`Exact duplicate source. Existing case ${result.case?.case_id || 'unknown'} owns this hash.`, 'warning');
-    else showBanner(`Source bill loaded for session ${result.billSessionId}.`, 'success');
+    else if (result.duplicate) showBanner(`Duplicate source bill. Existing session ${result.billSessionId || 'unknown'} owns this hash.`, 'warning');
+    else showBanner(`Source bill parsed for session ${result.billSessionId}: ${result.parseResult?.candidateCount || 0} candidate(s).`, 'success');
     await refreshState();
   } catch (error) {
     showBanner(safeMessage(error), 'error');

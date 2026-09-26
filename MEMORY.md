@@ -1,85 +1,96 @@
 # Project Memory
 
-Read this file first for current implementation state. Source audit evidence is in `docs/SOURCE_AUDIT.md`; Phase 1 notes are in `docs/PHASE_01_IMPLEMENTATION.md`; Phase 2 notes are in `docs/PHASE_02_IMPLEMENTATION.md`; Storage migration details are in `docs/STORAGE_MIGRATION.md`.
+Read this file first for current implementation state. Source audit evidence is in `docs/SOURCE_AUDIT.md`; Phase implementation notes are in `docs/PHASE_01_IMPLEMENTATION.md`, `docs/PHASE_02_IMPLEMENTATION.md`, and `docs/PHASE_03_IMPLEMENTATION.md`.
 
 ## Current Project Status
 
 - **Current branch:** `arena/01a0dfad-billing-suit`
-- **Phase 1 baseline:** `395acad1d2a765fb741172c81adb9c77c298d404` / `phase-01-desktop-foundation`
-- **Phase 2 commit target:** `phase-02: external storage and runtime persistence foundation`
+- **Phase 2 baseline:** `849c01e58a54108dfbc3e60d62f62ad5af43cb85` / `phase-02-external-storage`
+- **Phase 3 commit target:** `phase-03: implement source PDF ingestion and parser regression coverage`
 - **Product version:** `5.0.0-rc.2`
-- **Current milestone:** Phase 2 External Storage, Persistent Runtime Data & Recovery Foundation implemented in the working tree.
-- **Overall status:** StorageService, persistent source/final/session/audit/failure/config data, manifest, integrity checks, startup recovery, UI storage views, diagnostics, and Phase 2 tests are implemented. Electron runtime launch remains environment-blocked because install scripts were skipped and the Electron binary is unavailable.
+- **Current milestone:** Phase 3 Source Bill PDF Ingestion, Evidence Extraction & Historical Parser Regression implemented in the working tree.
+- **Overall status:** Source PDF import through external Storage, immutable artifact parsing, page extraction, conservative normalization, section detection, evidence candidate extraction, parse-result persistence, audit/failure records, and Source Bills UI candidate presentation are implemented. Electron runtime launch remains environment-blocked because install scripts were skipped and the Electron binary is unavailable.
 
-## Phase 2 implementation summary
+## Phase 3 implementation summary
 
-Phase 2 turns the Phase 1 folder structure into one authoritative runtime persistence layer in `src/core/storage.js`.
+Phase 3 adds parser evidence extraction without changing CGHS business logic or portal behavior.
 
-Implemented foundations:
+Implemented:
 
-- `StorageService` central abstraction with root resolution, initialization, health checks, manifest handling, safe folder access, atomic JSON writes, file copy/move helpers, temp lifecycle, source/final artifact storage, session registry, audit/failure records, and usage summaries.
-- External default root contract: `<ApplicationData>/CGHS-Billing-Suite/Storage` through Electron `app.getPath('appData')` at runtime.
-- Health statuses: `NOT_INITIALIZED`, `INITIALIZING`, `READY`, `READ_ONLY`, `ACCESS_ERROR`, `CORRUPT`, `ERROR`.
-- READY requires root existence, canonical directories, read access, write probe, and temp create/remove verification.
-- Storage manifest at `Storage/Config/storage-manifest.json`.
-- Phase 2 settings under `Storage/Config/application-settings.json`, with idempotent migration from Phase 1 `phase1-settings.json` when present.
-- Source bill persistence under `Storage/Source_Bills/<billSessionId>/source.pdf` and `metadata.json`.
-- Source SHA-256/size verification and duplicate detection by SHA-256.
-- Persistent bill session registry under `Storage/Config/bill-sessions/`.
-- Final bill placeholder/storage mechanism under `Storage/Final_Bills/<billSessionId>/` without fake final PDF generation.
-- Persistent structured audit records in `Storage/Audit/audit-YYYY-MM-DD.jsonl`.
-- Persistent failure records in `Storage/Failures/<failureId>.json` with sanitized messages.
-- Startup temp cleanup for application-generated temp artifacts only.
-- Corrupted JSON detection that preserves the corrupt file copy and does not replace historical data with empty defaults.
-- Diagnostics now report storage root, manifest status, health probe details, recovery summary, usage, and record counts.
-- UI now displays real storage health, persisted source bill records, and persistent audit history.
+- `src/services/bill-ingestion/source-parser.js` with parser version `3.0.0`.
+- PDF parse flow from stored `Storage/Source_Bills/<billSessionId>/source.pdf`.
+- Structured page model with raw and normalized text.
+- Conservative normalization that preserves parentheses and code characters.
+- Source section detection with `UNKNOWN_SECTION` fallback.
+- Evidence candidates for parenthesized `Description (CODE)` layouts.
+- Source-derived quantity extraction only; no CGHS-derived formula logic.
+- Candidate provenance with page, section, source text, and line numbers.
+- Persistent `parse-result.json` under each source bill directory.
+- Parser audit events and sanitized failure artifacts.
+- UI parser status, candidate count, warnings, candidate table, and evidence display.
+- Synthetic golden regression fixtures in `tests/fixtures/parser/`.
+- Phase 3 tests in `tests/unit/phase3-source-parser.test.js`.
+
+## Historical parser regression status
+
+Phase 0 found that `Description (CODE)` was not proven fixed. Phase 3 now covers:
+
+- same-line `Blood Transfusion Charge (C008)`;
+- wrapped `Blood Transfusion Charge` newline `(C008)`;
+- `Qty` on same or following line;
+- multiple candidates on a page;
+- negative parenthesized values.
+
+The parser preserves `C008` as `C008`; it does not map to `CC008` or perform alias/business-rule normalization.
+
+`REAL_PDF_REGRESSION`: `NOT AVAILABLE — synthetic fixture used`. No approved real hospital-bill PDF fixture exists in this checkout.
 
 ## Safety constraints to preserve
 
-- Storage must never become a secret store. Settings/failures/diagnostics reject or redact passwords, credentials, cookies, tokens, API keys, and auth/session payloads.
-- Renderer must not receive arbitrary filesystem, shell, Python, Node, JavaScript eval, or process execution capability.
-- Folder opening remains allowlisted through `storage.openFolder(folderKey)`.
-- Do not modify CGHS mapping/rule semantics, parser behavior, portal Selenium/CDP behavior, final-bill business semantics, credential entry/storage, or automatic discharge in Phase 2.
-- Resetting the current bill clears active/transient UI state only; it must not delete source PDFs, final PDFs, audit, failure, or session metadata.
-- Portal readiness remains `NOT VERIFIED` until authenticated validation exists.
+- Parser output is evidence only, not executable actions.
+- Do not map `C008 -> CC008` or apply any CGHS alias/rule semantics in the parser.
+- Do not calculate C002 oxygen, CN002, ICU, ward, or other domain-derived quantities in the parser.
+- Do not invoke Selenium, CDP, portal automation, final PDF generation, automatic discharge, external APIs, or credential entry/storage from source parsing.
+- Do not log full PDF text, patient-sensitive content, credentials, cookies, tokens, or browser session payloads.
+- Renderer still must not receive arbitrary filesystem, shell, Python, Node, JavaScript eval, or process execution capability.
 
-## Legacy Storage compatibility
+## Current architecture snapshot
 
-The following compatibility folders remain created because existing services still consume them:
-
-| Folder | Consumer | Migration status |
-|---|---|---|
-| `Cases` | `CaseStore`, `CaseWorkflowService`, validation production runs | Retained; not migrated in Phase 2. |
-| `Custom_Codes` | `CustomCodeRegistry` | Retained; not migrated in Phase 2. |
-| `Inbox/Initial`, `Inbox/Final` | `InboxScanner`, `InboxWatcher` | Retained; not migrated in Phase 2. |
-| `Bills` | `completed-bill-storage` | Retained; later final-output migration required. |
-| `Logs` | logger and inbox watcher audit | Retained; logging migration not part of Phase 2. |
-| `Reports`, `Supporting_Sections`, `Failed` | Historical/compatibility paths | Retained for non-destructive compatibility. |
+```text
+Renderer UI
+  -> window.cghsSuite controlled API
+Electron main process
+  -> StorageService source import
+  -> parseStoredSourceBill / source-parser
+  -> Storage/Source_Bills/<billSessionId>/parse-result.json
+  -> audit/failure records
+Existing business/portal/final services remain separate
+```
 
 ## Validation log
 
-Validation commands run during Phase 2 implementation:
+Validation commands run during Phase 3 implementation:
 
-- `node --check src/core/storage.js src/services/diagnostics/diagnostics-service.js src/desktop/ipc-contract.js src/desktop/preload.js src/desktop/main.js src/ui/renderer.js tests/unit/phase2-storage-service.test.js` — PASS.
-- `node --test tests/unit/phase2-storage-service.test.js` — PASS, 26/26 tests.
-- Initial `npm test` before dependency install — FAIL because `pdf-lib` was missing.
-- `npm ci --ignore-scripts` — completed, installed dependencies, left Electron binary unavailable as expected.
-- Final `npm test` — PASS, 313/313 tests.
+- `node --check src/services/bill-ingestion/source-parser.js src/core/storage.js src/desktop/main.js src/desktop/ipc-contract.js src/desktop/preload.js src/ui/renderer.js tests/unit/phase3-source-parser.test.js` — PASS.
+- `node --test tests/unit/phase3-source-parser.test.js` — PASS, 31/31 tests.
+- `npm test` — PASS, 344/344 tests.
 - `python3 -m unittest discover -s tests/python -p 'test_*.py'` — PASS, 32/32 tests.
-- `npm run test:desktop` — FAIL/BLOCKED before Electron launch: `Electron failed to install correctly` because Electron postinstall was skipped.
+- `npm run test:desktop` — FAIL/BLOCKED before Electron launch: `Electron failed to install correctly` after dependency install with scripts skipped.
 
 Known environment notes:
 
 - Electron runtime smoke is not a product PASS in this environment.
 - Live CGHS portal validation is not verified.
-- Windows EXE, clean-machine, and packaged artifact validation are not Phase 2 claims.
+- Real PDF regression is not available; only synthetic non-PHI fixtures were used.
+- Windows EXE, clean-machine, and packaged artifact validation are not Phase 3 claims.
 
 ## Important paths
 
-- `src/core/storage.js` — Phase 2 authoritative `StorageService` and compatibility exports.
-- `src/desktop/main.js` — StorageService bootstrap, source/final artifact persistence, persistent audit/failure integration, controlled IPC handlers.
-- `src/desktop/ipc-contract.js` — Phase 2 storage operations added to the allowlisted IPC contract.
-- `src/desktop/preload.js` — controlled renderer API for source list and storage usage.
-- `src/services/diagnostics/diagnostics-service.js` — storage diagnostics/recovery/usage reporting.
-- `src/ui/index.html`, `src/ui/renderer.js` — storage status, persisted source records, persistent audit UI.
-- `tests/unit/phase2-storage-service.test.js` — Phase 2 regression coverage.
+- `src/services/bill-ingestion/source-parser.js` — Phase 3 parser pipeline.
+- `src/core/storage.js` — parse-result persistence helpers.
+- `src/desktop/main.js` — Source Bills import/parse integration.
+- `src/desktop/ipc-contract.js`, `src/desktop/preload.js` — controlled parse-result access.
+- `src/ui/index.html`, `src/ui/renderer.js` — Source Bills candidate/evidence UI.
+- `tests/unit/phase3-source-parser.test.js` — Phase 3 parser regression coverage.
+- `tests/fixtures/parser/*.expected.json` — synthetic golden parser expectations.
+- `docs/PARSER_PIPELINE.md` and `docs/PARSER_REGRESSION.md` — parser architecture and regression documentation.
