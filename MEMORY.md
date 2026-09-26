@@ -1,82 +1,85 @@
 # Project Memory
 
-Read this file first for current implementation state. Detailed source audit evidence is in `docs/SOURCE_AUDIT.md`; Phase 1 implementation notes are in `docs/PHASE_01_IMPLEMENTATION.md`; current roadmap status is in `PHASES.md`.
+Read this file first for current implementation state. Source audit evidence is in `docs/SOURCE_AUDIT.md`; Phase 1 notes are in `docs/PHASE_01_IMPLEMENTATION.md`; Phase 2 notes are in `docs/PHASE_02_IMPLEMENTATION.md`; Storage migration details are in `docs/STORAGE_MIGRATION.md`.
 
 ## Current Project Status
 
 - **Current branch:** `arena/01a0dfad-billing-suit`
-- **Baseline before Phase 1 work:** `22ba5eec067fa347268ba1af88db3a847962deaa`
-- **Phase 1 commit target:** `phase-01: establish desktop foundation and application shell`
+- **Phase 1 baseline:** `395acad1d2a765fb741172c81adb9c77c298d404` / `phase-01-desktop-foundation`
+- **Phase 2 commit target:** `phase-02: external storage and runtime persistence foundation`
 - **Product version:** `5.0.0-rc.2`
-- **Current milestone:** Phase 1 Desktop Foundation, Application Shell & Safe Architecture implemented in the working tree.
-- **Overall status:** Phase 1 source implementation and unit/integration test validation are expected to be completed on this branch. Electron runtime launch/package validation remains environment-dependent unless Electron is installed and launched separately.
+- **Current milestone:** Phase 2 External Storage, Persistent Runtime Data & Recovery Foundation implemented in the working tree.
+- **Overall status:** StorageService, persistent source/final/session/audit/failure/config data, manifest, integrity checks, startup recovery, UI storage views, diagnostics, and Phase 2 tests are implemented. Electron runtime launch remains environment-blocked because install scripts were skipped and the Electron binary is unavailable.
 
-## Phase 1 implementation summary
+## Phase 2 implementation summary
 
-Phase 1 keeps the existing vanilla Electron/JavaScript stack and adds a safer desktop foundation without changing validated parser, CGHS rule, final-bill, portal, Selenium/CDP, or legacy Python behavior.
+Phase 2 turns the Phase 1 folder structure into one authoritative runtime persistence layer in `src/core/storage.js`.
 
 Implemented foundations:
 
-- Canonical runtime Storage in `src/core/storage.js` with `Storage/{Source_Bills,Final_Bills,Audit,Failures,Temp,Config}` and compatibility folders for existing services.
-- Serializable Phase 1 app state in `src/core/application-state-store.js`.
-- Explicit active-bill isolation through `billSessionId`.
-- Current-bill reset that clears active enhancement/final/portal/validation/transient state while preserving history and stored artifacts.
-- Sanitized error model in `src/core/application-error.js`.
-- Non-secret settings persistence in `src/core/settings-store.js`.
-- Safe diagnostics service in `src/services/diagnostics/diagnostics-service.js`.
-- Controlled IPC contract and dispatcher in `src/desktop/ipc-contract.js` and `src/desktop/phase1-ipc.js`.
-- Context-isolated preload API in `src/desktop/preload.js` via `window.cghsSuite`.
-- Professional Phase 1 shell in `src/ui/index.html`, `src/ui/renderer.js`, and `src/ui/styles.css`.
-- Phase 1 tests in `tests/unit/phase1-*.test.js`.
+- `StorageService` central abstraction with root resolution, initialization, health checks, manifest handling, safe folder access, atomic JSON writes, file copy/move helpers, temp lifecycle, source/final artifact storage, session registry, audit/failure records, and usage summaries.
+- External default root contract: `<ApplicationData>/CGHS-Billing-Suite/Storage` through Electron `app.getPath('appData')` at runtime.
+- Health statuses: `NOT_INITIALIZED`, `INITIALIZING`, `READY`, `READ_ONLY`, `ACCESS_ERROR`, `CORRUPT`, `ERROR`.
+- READY requires root existence, canonical directories, read access, write probe, and temp create/remove verification.
+- Storage manifest at `Storage/Config/storage-manifest.json`.
+- Phase 2 settings under `Storage/Config/application-settings.json`, with idempotent migration from Phase 1 `phase1-settings.json` when present.
+- Source bill persistence under `Storage/Source_Bills/<billSessionId>/source.pdf` and `metadata.json`.
+- Source SHA-256/size verification and duplicate detection by SHA-256.
+- Persistent bill session registry under `Storage/Config/bill-sessions/`.
+- Final bill placeholder/storage mechanism under `Storage/Final_Bills/<billSessionId>/` without fake final PDF generation.
+- Persistent structured audit records in `Storage/Audit/audit-YYYY-MM-DD.jsonl`.
+- Persistent failure records in `Storage/Failures/<failureId>.json` with sanitized messages.
+- Startup temp cleanup for application-generated temp artifacts only.
+- Corrupted JSON detection that preserves the corrupt file copy and does not replace historical data with empty defaults.
+- Diagnostics now report storage root, manifest status, health probe details, recovery summary, usage, and record counts.
+- UI now displays real storage health, persisted source bill records, and persistent audit history.
 
 ## Safety constraints to preserve
 
-- The renderer must not directly access arbitrary filesystem APIs, child processes, Python, Selenium, Storage folder manipulation, or CGHS rule logic.
-- Do not expose generic execution APIs such as `execute(command,payload)`, `runShell`, `runPython`, or `executeJS`.
-- Do not modify CGHS mapping/rule semantics, C002/C003 behavior, quantity rules, portal duplicate prevention, portal quantity reconciliation, speciality logic, locked quantity behavior, Selenium workflow, CDP behavior, or final-bill business rules as part of Phase 1.
-- Do not add credential entry/storage, automatic discharge, blind duplicate Plus clicks, unsupported DOM lock bypasses, invented CGHS codes/rates/portal behavior, global alias transforms, or unrun PASS claims.
-- Portal status remains `NOT VERIFIED` until authenticated portal validation exists.
+- Storage must never become a secret store. Settings/failures/diagnostics reject or redact passwords, credentials, cookies, tokens, API keys, and auth/session payloads.
+- Renderer must not receive arbitrary filesystem, shell, Python, Node, JavaScript eval, or process execution capability.
+- Folder opening remains allowlisted through `storage.openFolder(folderKey)`.
+- Do not modify CGHS mapping/rule semantics, parser behavior, portal Selenium/CDP behavior, final-bill business semantics, credential entry/storage, or automatic discharge in Phase 2.
+- Resetting the current bill clears active/transient UI state only; it must not delete source PDFs, final PDFs, audit, failure, or session metadata.
+- Portal readiness remains `NOT VERIFIED` until authenticated validation exists.
 
-## Current architecture snapshot
+## Legacy Storage compatibility
 
-```text
-Renderer UI (vanilla HTML/CSS/JS)
-  -> window.cghsSuite controlled API
-Preload bridge (context isolation)
-  -> cghs-suite:operation IPC contract
-Electron main process
-  -> Node services and adapters
-  -> external Storage
-  -> preserved portal adapter / Python executor where already implemented
-```
+The following compatibility folders remain created because existing services still consume them:
 
-The renderer-facing Phase 1 state tree contains app info/status, storage status, current bill, enhancement, final bill, diagnostics, settings, history, portal status, and transient UI state.
+| Folder | Consumer | Migration status |
+|---|---|---|
+| `Cases` | `CaseStore`, `CaseWorkflowService`, validation production runs | Retained; not migrated in Phase 2. |
+| `Custom_Codes` | `CustomCodeRegistry` | Retained; not migrated in Phase 2. |
+| `Inbox/Initial`, `Inbox/Final` | `InboxScanner`, `InboxWatcher` | Retained; not migrated in Phase 2. |
+| `Bills` | `completed-bill-storage` | Retained; later final-output migration required. |
+| `Logs` | logger and inbox watcher audit | Retained; logging migration not part of Phase 2. |
+| `Reports`, `Supporting_Sections`, `Failed` | Historical/compatibility paths | Retained for non-destructive compatibility. |
 
 ## Validation log
 
-Validation commands run during Phase 1 implementation:
+Validation commands run during Phase 2 implementation:
 
-- `node --check src/desktop/main.js src/desktop/preload.js src/ui/renderer.js src/core/storage.js src/core/application-state-store.js src/desktop/ipc-contract.js src/desktop/phase1-ipc.js src/core/settings-store.js src/services/diagnostics/diagnostics-service.js` — PASS.
-- `node --test tests/unit/phase1-*.test.js` — PASS, 15/15 tests.
-- `npm test` — PASS, 287/287 tests.
+- `node --check src/core/storage.js src/services/diagnostics/diagnostics-service.js src/desktop/ipc-contract.js src/desktop/preload.js src/desktop/main.js src/ui/renderer.js tests/unit/phase2-storage-service.test.js` — PASS.
+- `node --test tests/unit/phase2-storage-service.test.js` — PASS, 26/26 tests.
+- Initial `npm test` before dependency install — FAIL because `pdf-lib` was missing.
+- `npm ci --ignore-scripts` — completed, installed dependencies, left Electron binary unavailable as expected.
+- Final `npm test` — PASS, 313/313 tests.
 - `python3 -m unittest discover -s tests/python -p 'test_*.py'` — PASS, 32/32 tests.
-- `npm run test:desktop` — FAIL/BLOCKED before Electron launch: `Electron failed to install correctly` after dependency install with scripts skipped.
+- `npm run test:desktop` — FAIL/BLOCKED before Electron launch: `Electron failed to install correctly` because Electron postinstall was skipped.
 
 Known environment notes:
 
-- Earlier dependency install used `npm ci --ignore-scripts`; Electron postinstall was skipped. `npm run test:desktop` was attempted and failed before launch with `Electron failed to install correctly`; do not claim packaged/runtime Electron smoke PASS unless Electron is installed and launched successfully later.
-- Live CGHS portal validation is not verified in this environment.
-- Windows EXE, clean-machine, and packaged artifact validation are not Phase 1 claims.
+- Electron runtime smoke is not a product PASS in this environment.
+- Live CGHS portal validation is not verified.
+- Windows EXE, clean-machine, and packaged artifact validation are not Phase 2 claims.
 
 ## Important paths
 
-- `src/desktop/main.js` — Electron lifecycle and service wiring.
-- `src/desktop/preload.js` — renderer preload bridge.
-- `src/desktop/ipc-contract.js` — allowed Phase 1 operations.
-- `src/desktop/phase1-ipc.js` — controlled IPC dispatcher.
-- `src/core/storage.js` — external Storage foundation.
-- `src/core/application-state-store.js` — centralized Phase 1 state.
-- `src/core/settings-store.js` — persisted settings.
-- `src/services/diagnostics/diagnostics-service.js` — diagnostics reports.
-- `src/ui/index.html`, `src/ui/renderer.js`, `src/ui/styles.css` — Phase 1 desktop shell.
-- `tests/unit/phase1-*.test.js` — Phase 1 regression coverage.
+- `src/core/storage.js` — Phase 2 authoritative `StorageService` and compatibility exports.
+- `src/desktop/main.js` — StorageService bootstrap, source/final artifact persistence, persistent audit/failure integration, controlled IPC handlers.
+- `src/desktop/ipc-contract.js` — Phase 2 storage operations added to the allowlisted IPC contract.
+- `src/desktop/preload.js` — controlled renderer API for source list and storage usage.
+- `src/services/diagnostics/diagnostics-service.js` — storage diagnostics/recovery/usage reporting.
+- `src/ui/index.html`, `src/ui/renderer.js` — storage status, persisted source records, persistent audit UI.
+- `tests/unit/phase2-storage-service.test.js` — Phase 2 regression coverage.

@@ -11,7 +11,7 @@ const { createLogger } = require('../core/logger');
 const { createAppState } = require('../core/app-state');
 const { createApplicationStateStore, APP_STATUS, BILL_STATUS, ENHANCEMENT_STATUS, FINAL_BILL_STATUS, PORTAL_STATUS } = require('../core/application-state-store');
 const { SettingsStore } = require('../core/settings-store');
-const { STORAGE_FOLDERS, ensureStorage, getStorageInfo, resolveStoragePath } = require('../core/storage');
+const { STORAGE_FOLDERS, StorageService, ensureStorage, resolveStoragePath } = require('../core/storage');
 const { createBundledRateRepository, evaluateBill } = require('../services/cghs');
 const { adaptEnhancementPlan } = require('../adapters/legacy-portal/plan-adapter');
 const { LegacyPythonRunner } = require('../adapters/legacy-portal/python-runner');
@@ -34,6 +34,7 @@ let mainWindow = null;
 let logger = null;
 let config = null;
 let storageInfo = null;
+let storageService = null;
 let rateRepository = null;
 let customCodeRegistry = null;
 let currentBill = null;
@@ -141,11 +142,26 @@ async function selectAndParseSourceBill() {
   clearActiveBillWorkspace();
   try {
     const filePath = selection.filePaths[0];
-    const source = { file_path: filePath, file_name: path.basename(filePath), sha256: crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') };
+    const importResult = storageService.importSourceBill(filePath, { originalFileName: path.basename(filePath) });
+    if (importResult.status === 'DUPLICATE_SOURCE_BILL') {
+      phase1State.appendHistory({ billSessionId: importResult.billSessionId, operation: 'SOURCE_BILL_DUPLICATE', status: 'DUPLICATE_SOURCE_BILL', source_reference: importResult.metadata });
+      return { canceled: false, duplicate: true, duplicateCode: 'DUPLICATE_SOURCE_BILL', billSessionId: importResult.billSessionId, source: importResult.metadata, appState: phase1State.snapshot() };
+    }
+    if (importResult.status !== 'IMPORTED') {
+      throw new Error(importResult.message || importResult.code || importResult.status);
+    }
+    const source = {
+      file_path: importResult.paths.sourceFile,
+      file_name: importResult.metadata.originalFileName,
+      sha256: importResult.metadata.sha256,
+      source_bill_id: importResult.sourceBillId
+    };
     const result = await caseWorkflow.importInitial(source);
     if (result.outcome === 'EXACT_DUPLICATE') {
-      phase1State.appendHistory({ operation: 'SOURCE_BILL_DUPLICATE', status: 'EXACT_DUPLICATE', source_reference: source });
-      return { canceled: false, duplicate: true, case: result.case, appState: phase1State.snapshot() };
+      storageService.updateBillSession(importResult.billSessionId, { status: 'DUPLICATE_CASE', sourceBillId: importResult.sourceBillId, sourcePath: importResult.paths.sourceFile });
+      storageService.appendAudit({ billSessionId: importResult.billSessionId, operation: 'CASE_DUPLICATE_DETECTED', stage: 'CASE_WORKFLOW', status: 'DUPLICATE', sourceRef: source });
+      phase1State.appendHistory({ billSessionId: importResult.billSessionId, operation: 'SOURCE_BILL_DUPLICATE', status: 'EXACT_DUPLICATE', source_reference: source });
+      return { canceled: false, duplicate: true, duplicateCode: 'EXACT_DUPLICATE_CASE', billSessionId: importResult.billSessionId, case: result.case, source: importResult.metadata, appState: phase1State.snapshot() };
     }
     if (!result.bill || !result.plan) throw new Error(result.reason || result.outcome);
     currentCaseId = result.case.case_id;
@@ -158,21 +174,26 @@ async function selectAndParseSourceBill() {
     customCodeRegistry.recordPlanUsage(result.plan);
     state.set('BILL_LOADED');
     const billSessionId = phase1State.startBillSession({
+      billSessionId: importResult.billSessionId,
       source,
-      metadata: billMetadataForState(result.bill, result.case)
+      metadata: { ...billMetadataForState(result.bill, result.case), persistedSource: importResult.metadata }
     });
+    const planPath = result.case.enhancement_plan_reference?.path || null;
+    storageService.updateBillSession(billSessionId, { status: result.case.workflow_status || 'PARSED', sourceBillId: importResult.sourceBillId, sourcePath: importResult.paths.sourceFile, enhancementPlanPath: planPath });
     phase1State.setEnhancement({
       billSessionId,
       status: enhancementStatusForPlan(result.plan),
       plan: result.plan,
       diagnostics: result.plan.warnings || []
     });
+    storageService.appendAudit({ billSessionId, operation: 'SOURCE_BILL_PARSE', stage: 'BILL_INGESTION', status: 'SUCCESS', sourceRef: { caseId: currentCaseId, sourcePath: importResult.paths.sourceFile } });
     logger.info('Case initial bill parsed and plan persisted', { caseId: currentCaseId, billSessionId, pages: result.bill.parsing_audit.pages_processed, planEntries: result.plan.entries.length, workflowStatus: result.case.workflow_status });
-    return { canceled: false, billSessionId, case: result.case, bill: result.bill, enhancementPlan: result.plan, appState: phase1State.snapshot() };
+    return { canceled: false, billSessionId, source: importResult.metadata, case: result.case, bill: result.bill, enhancementPlan: result.plan, appState: phase1State.snapshot() };
   } catch (error) {
     state.set('ERROR');
     phase1State.setAppStatus(APP_STATUS.ERROR, error.message);
     phase1State.appendHistory({ operation: 'SOURCE_BILL_PARSE', status: 'FAILED', error_code: error.code || 'APP_INTERNAL_ERROR' });
+    try { storageService?.appendFailure({ stage: 'BILL_INGESTION', code: error.code || 'APP_INTERNAL_ERROR', message: error.message, recoverable: true }); } catch (_) { /* failure persistence is best effort during error handling */ }
     logger.error('Bill PDF parsing failed', error);
     throw new Error(`Bill could not be parsed: ${error.message}`);
   }
@@ -190,34 +211,38 @@ function createPhase1Handlers() {
       arch: process.arch,
       branchLocked: 'arena/01a0dfad-billing-suit'
     }),
-    [OPERATIONS.APP_GET_STATUS]: () => phase1State.snapshot(),
+    [OPERATIONS.APP_GET_STATUS]: () => {
+      if (storageService) phase1State.setStorageStatus(storageService.getStatus());
+      return phase1State.snapshot();
+    },
     [OPERATIONS.APP_GET_DIAGNOSTICS]: () => {
       const report = createDiagnosticsReport({
         storageRoot: storageInfo?.path || null,
+        storageService,
         appInfo: { version: app.getVersion(), packaged: app.isPackaged, environment: config?.environment, electronVersion: process.versions.electron || null },
         billSessionId: phase1State.getCurrentBillSessionId(),
-        applicationState: phase1State.snapshot()
+        applicationState: phase1State.snapshot(),
+        includeUsage: true
       });
       phase1State.setDiagnostics({ records: [report] });
       return report;
     },
     [OPERATIONS.STORAGE_GET_STATUS]: () => {
-      storageInfo = getStorageInfo(storageInfo.path);
+      storageInfo = storageService.getStatus();
       phase1State.setStorageStatus(storageInfo);
       return storageInfo;
     },
     [OPERATIONS.STORAGE_OPEN_ROOT]: async () => ({ path: storageInfo.path, result: await shell.openPath(storageInfo.path) }),
     [OPERATIONS.STORAGE_OPEN_FOLDER]: async (payload = {}) => {
       const name = String(payload.name || '');
-      if (!STORAGE_FOLDERS.includes(name)) throw new Error(`Unsupported Storage folder: ${name}`);
-      const folder = path.join(storageInfo.path, name);
-      fs.mkdirSync(folder, { recursive: true });
-      return { path: folder, result: await shell.openPath(folder) };
+      return storageService.openFolder(name, (folder) => shell.openPath(folder));
     },
-    [OPERATIONS.STORAGE_LIST_RECENT]: () => caseStore ? caseStore.list().slice(0, 10).map((item) => ({ caseId: item.case_id, billNumber: item.bill_number, status: item.workflow_status, updatedAt: item.updated_at })) : [],
+    [OPERATIONS.STORAGE_LIST_RECENT]: () => storageService ? storageService.listBillSessions().slice(0, 10).map((item) => item.session || item) : [],
+    [OPERATIONS.STORAGE_LIST_SOURCE_BILLS]: () => storageService ? storageService.listSourceBills({ verifyHash: false }) : [],
+    [OPERATIONS.STORAGE_GET_USAGE]: () => storageService ? storageService.getUsageSummary() : null,
     [OPERATIONS.BILL_GET_CURRENT]: () => phase1State.snapshot().currentBill,
-    [OPERATIONS.BILL_CLEAR_CURRENT]: () => { clearActiveBillWorkspace(); return phase1State.snapshot().currentBill; },
-    [OPERATIONS.BILL_RESET]: () => { clearActiveBillWorkspace(); return phase1State.snapshot(); },
+    [OPERATIONS.BILL_CLEAR_CURRENT]: () => { const billSessionId = phase1State.getCurrentBillSessionId(); clearActiveBillWorkspace(); if (billSessionId) storageService?.appendAudit({ billSessionId, operation: 'CURRENT_BILL_RESET', stage: 'UI', status: 'SUCCESS' }); return phase1State.snapshot().currentBill; },
+    [OPERATIONS.BILL_RESET]: () => { const billSessionId = phase1State.getCurrentBillSessionId(); clearActiveBillWorkspace(); if (billSessionId) storageService?.appendAudit({ billSessionId, operation: 'CURRENT_BILL_RESET', stage: 'UI', status: 'SUCCESS' }); return phase1State.snapshot(); },
     [OPERATIONS.BILL_SELECT]: () => selectAndParseSourceBill(),
     [OPERATIONS.ENHANCEMENT_GET_PLAN]: () => currentEnhancementPlan ? { billSessionId: phase1State.getCurrentBillSessionId(), plan: currentEnhancementPlan } : { billSessionId: phase1State.getCurrentBillSessionId(), plan: null, message: 'No EnhancementPlan available.' },
     [OPERATIONS.ENHANCEMENT_GET_STATUS]: () => phase1State.snapshot().enhancement,
@@ -228,7 +253,7 @@ function createPhase1Handlers() {
       phase1State.setSettings({ publicConfig: publicConfig(), settings: phase1Settings });
       return { settings: phase1Settings, restartRequired: Object.prototype.hasOwnProperty.call(payload, 'storagePath') };
     },
-    [OPERATIONS.HISTORY_LIST]: () => phase1State.snapshot().history,
+    [OPERATIONS.HISTORY_LIST]: () => storageService ? storageService.listAuditRecords({ limit: 100 }) : phase1State.snapshot().history,
     [OPERATIONS.DIAGNOSTICS_OPEN_FOLDER]: async () => {
       const folder = ensureDiagnosticsFolder(storageInfo.path);
       return { path: folder, result: await shell.openPath(folder) };
@@ -302,8 +327,9 @@ function registerIpc() {
     try {
       const filePath=selection.filePaths[0]; const file={file_path:filePath,file_name:path.basename(filePath),sha256:crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')};
       const result=await caseWorkflow.attachFinal(currentCaseId,file,currentEnhancementPlan,currentExecutionAudit);
-      currentFinalBillPath=filePath;currentCompletedBill=result.completedBill||null;if(currentProductionValidationRun&&currentCompletedBill)currentProductionValidationRun=productionValidationService.linkFinalBill(currentProductionValidationRun,{caseId:currentCaseId,result:currentCompletedBill});
+      currentFinalBillPath=filePath;currentCompletedBill=result.completedBill||null;const billSessionId=phase1State.getCurrentBillSessionId();if(billSessionId)storageService.storeFinalBillFile(billSessionId,filePath,{originalFileName:path.basename(filePath),overwrite:true,sessionStatus:result.outcome||'FINAL_BILL_IMPORTED'});if(currentProductionValidationRun&&currentCompletedBill)currentProductionValidationRun=productionValidationService.linkFinalBill(currentProductionValidationRun,{caseId:currentCaseId,result:currentCompletedBill});
       if(!currentCompletedBill)return{canceled:false,outcome:result.outcome,case:result.case};
+      if(billSessionId)phase1State.setFinalBill({billSessionId,status:FINAL_BILL_STATUS.READY,source:file,diagnostics:[]});
       logger.info('Case final bill parsed locally',{caseId:currentCaseId,runId:currentCompletedBill.run_id,status:currentCompletedBill.status});
       return{canceled:false,outcome:result.outcome,case:result.case,completedBill:currentCompletedBill};
     } catch (error) { logger.error('Final bill parsing failed', { caseId:currentCaseId,message:error.message }); throw new Error(`Final bill could not be parsed: ${error.message}`); }
@@ -372,20 +398,22 @@ async function bootstrap() {
       documentsPath: app.getPath('documents'),
       appDir: APP_DIR
     });
-    storageInfo = ensureStorage(storagePath);
-    settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'phase1-settings.json'));
+    storageService = new StorageService({ root: storagePath, appDataPath: app.getPath('appData'), documentsPath: app.getPath('documents'), appDir: APP_DIR });
+    storageInfo = storageService.initialize({ legacySettingsPath: path.join(app.getPath('userData'), 'phase1-settings.json') });
+    if (storageInfo.status !== 'READY' && storageInfo.status !== 'CORRUPT') throw new Error(`Storage is not ready: ${storageInfo.status}${storageInfo.error ? ` - ${storageInfo.error}` : ''}`);
+    settingsStore = new SettingsStore(storageService.getSettingsPath());
     phase1Settings = settingsStore.load();
-    if (!phase1Settings.storagePath) phase1Settings = settingsStore.save({ storagePath, loggingLevel: config.logging.level, diagnosticsEnabled: true });
+    if (!phase1Settings.corrupt && !phase1Settings.storagePath) phase1Settings = settingsStore.save({ storagePath, loggingLevel: config.logging.level, diagnosticsEnabled: true });
     phase1State.setAppInfo({ productName: 'CGHS Billing Suite VNEXT', version: app.getVersion(), environment: config.environment, packaged: app.isPackaged });
     phase1State.setAppStatus(APP_STATUS.READY, 'Application ready');
     phase1State.setStorageStatus(storageInfo);
     phase1State.setSettings({ publicConfig: publicConfig(), settings: phase1Settings });
-    logger = createLogger({ logsDir: path.join(storagePath, 'Logs'), level: config.logging.level, source: 'desktop-main' });
+    logger = createLogger({ logsDir: storageService.getFolderPath('Logs'), level: config.logging.level, source: 'desktop-main' });
     customCodeRegistry = new CustomCodeRegistry(storagePath);
     rebuildRateRepository();
     caseStore=new CaseStore(storagePath);caseLock=new ActiveCaseLock(storagePath);inboxScanner=new InboxScanner(storagePath,{minAgeMs:Math.max(config.automaticInboxWatch.stabilityWindowMs,config.automaticInboxWatch.minimumFileAgeMs)});
     caseWorkflow=new CaseWorkflowService({store:caseStore,lock:caseLock,rateRepository,registrySnapshot:()=>customCodeRegistry.snapshot(),storageRoot:storagePath});productionValidationService=new ProductionValidationRunService({caseStore});
-    const watcherAuditFile=path.join(storagePath,'Logs','inbox-watcher.jsonl');
+    const watcherAuditFile=path.join(storageService.getFolderPath('Logs'),'inbox-watcher.jsonl');
     inboxWatcher=new InboxWatcher({scanner:inboxScanner,processCandidate:processInboxCandidate,intervalMs:config.automaticInboxWatch.pollingIntervalMs,maxQueue:config.automaticInboxWatch.maximumQueueSize,concurrency:config.automaticInboxWatch.backgroundConcurrency,audit:event=>fs.appendFileSync(watcherAuditFile,`${JSON.stringify(event)}\n`,{mode:0o600})});
     if(config.automaticInboxWatch.enabled)inboxWatcher.start();
     const recoveredCases=caseWorkflow.interruptPortalCases();
@@ -395,8 +423,10 @@ async function bootstrap() {
       version: app.getVersion(),
       rateRecords: rateRepository.provenance.record_count,
       rateAuthority: rateRepository.provenance.authority_status,
-      recoveredCases: recoveredCases.length
+      recoveredCases: recoveredCases.length,
+      storageStatus: storageInfo.status
     });
+    storageService.appendAudit({ operation: 'APPLICATION_STARTUP', stage: 'DESKTOP', status: 'SUCCESS', sourceRef: { recoveredCases, storageStatus: storageInfo.status } });
     registerPhase1Ipc(ipcMain, createPhase1Handlers());
     registerIpc();
     createWindow();

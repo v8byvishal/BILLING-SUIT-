@@ -4,7 +4,10 @@ const ui = {
   route: 'dashboard',
   appState: null,
   diagnostics: null,
-  settings: null
+  settings: null,
+  sourceRecords: [],
+  auditRecords: [],
+  usage: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -34,7 +37,7 @@ function statusClass(value) {
   const normalized = String(value || '').toUpperCase();
   if (/READY|LOADED|EXECUTED|GENERATED|PASS/.test(normalized)) return 'good';
   if (/REVIEW|NOT VERIFIED|NOT STARTED|NONE|NOT_INITIALIZED/.test(normalized)) return 'warn';
-  if (/ERROR|FAILED|READ_ONLY|ACCESS/.test(normalized)) return 'bad';
+  if (/ERROR|FAILED|READ_ONLY|ACCESS|CORRUPT/.test(normalized)) return 'bad';
   return 'neutral';
 }
 
@@ -65,6 +68,7 @@ function renderDashboard() {
   const metadata = bill.metadata || {};
   text('dashboardState', state.appStatus?.status || 'STARTING');
   text('dashboardStoragePath', state.storageStatus?.path || 'Storage unavailable');
+  text('dashboardStorageHealth', `${state.storageStatus?.status || 'UNKNOWN'} · manifest ${state.storageStatus?.manifestStatus || '—'} · write probe ${state.storageStatus?.writeProbe ? 'ok' : 'not verified'}`);
   text('dashboardSession', bill.billSessionId || 'NONE');
   text('dashboardBill', bill.status === 'LOADED' ? `${metadata.fileName || bill.source?.file_name || 'Source bill'} · ${metadata.billNumber || 'Bill number unavailable'}` : 'No source bill loaded.');
   text('dashboardEnhancement', state.enhancement?.plan ? `${state.enhancement.status} · ${state.enhancement.plan.entries?.length || 0} plan entr${state.enhancement.plan.entries?.length === 1 ? 'y' : 'ies'}` : 'No EnhancementPlan available.');
@@ -82,6 +86,29 @@ function renderSourceBill() {
   text('sourceBillNumber', meta.billNumber || '—');
   text('sourceIdentifiers', [meta.patientName, meta.uhid, meta.ipNumber].filter(Boolean).join(' · ') || '—');
   text('sourceSections', [...(meta.sections || []), ...(meta.excludedSections || []).map((x) => `${x} (excluded)`)].join(', ') || '—');
+  const body = $('sourceRecordRows');
+  if (body) {
+    body.replaceChildren();
+    if (!ui.sourceRecords.length) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 5;
+      cell.textContent = 'No persisted source bill records found.';
+      row.appendChild(cell);
+      body.appendChild(row);
+    } else {
+      for (const record of ui.sourceRecords) {
+        const meta = record.metadata || {};
+        const row = document.createElement('tr');
+        for (const value of [meta.importedAt || '—', meta.billSessionId || record.billSessionId || '—', meta.originalFileName || '—', record.status || meta.status || '—', meta.sha256 ? `${meta.sha256.slice(0, 12)}…` : '—']) {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          row.appendChild(cell);
+        }
+        body.appendChild(row);
+      }
+    }
+  }
 }
 
 function renderPlan() {
@@ -123,7 +150,7 @@ function renderFinalBill() {
 }
 
 function renderHistory() {
-  const records = activeState().history || [];
+  const records = ui.auditRecords.length ? ui.auditRecords : (activeState().history || []);
   text('historyCount', `${records.length} record${records.length === 1 ? '' : 's'}`);
   const body = $('historyRows');
   body.replaceChildren();
@@ -131,16 +158,16 @@ function renderHistory() {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = 5;
-    cell.textContent = 'No historical operations recorded in this session.';
+    cell.textContent = 'No persistent audit records found.';
     row.appendChild(cell);
     body.appendChild(row);
     return;
   }
   for (const record of records) {
     const row = document.createElement('tr');
-    for (const value of [record.timestamp, record.billSessionId || '—', record.operation, record.status, record.error_code || '—']) {
+    for (const value of [record.timestamp, record.billSessionId || '—', record.operation || record.event || '—', [record.stage, record.status].filter(Boolean).join(' / ') || '—', record.errorCode || record.error_code || '—']) {
       const cell = document.createElement('td');
-      cell.textContent = value;
+      cell.textContent = value || '—';
       row.appendChild(cell);
     }
     body.appendChild(row);
@@ -175,8 +202,16 @@ function renderAll() {
 async function refreshState() {
   clearBanner();
   try {
-    ui.appState = await suite().app.getStatus();
-    ui.settings = await suite().settings.get();
+    const [appState, settings, sourceRecords, auditRecords] = await Promise.all([
+      suite().app.getStatus(),
+      suite().settings.get(),
+      suite().storage.listSourceBills().catch(() => []),
+      suite().history.list().catch(() => [])
+    ]);
+    ui.appState = appState;
+    ui.settings = settings;
+    ui.sourceRecords = sourceRecords;
+    ui.auditRecords = auditRecords;
     renderAll();
   } catch (error) {
     showBanner(safeMessage(error), 'error');
@@ -254,6 +289,8 @@ function bind() {
   $('clearSourceBill').addEventListener('click', clearBill);
   $('openSourceFolder').addEventListener('click', () => suite().storage.openFolder('Source_Bills').catch((error) => showBanner(safeMessage(error), 'error')));
   $('openFinalFolder').addEventListener('click', () => suite().storage.openFolder('Final_Bills').catch((error) => showBanner(safeMessage(error), 'error')));
+  $('openAuditFolder').addEventListener('click', () => suite().storage.openFolder('Audit').catch((error) => showBanner(safeMessage(error), 'error')));
+  $('openFailuresFolder').addEventListener('click', () => suite().storage.openFolder('Failures').catch((error) => showBanner(safeMessage(error), 'error')));
   $('dashboardDiagnostics').addEventListener('click', () => { routeTo('diagnostics'); collectDiagnostics(); });
   $('settingsForm').addEventListener('submit', saveSettings);
   $('openConfigFolder').addEventListener('click', () => suite().storage.openFolder('Config').catch((error) => showBanner(safeMessage(error), 'error')));

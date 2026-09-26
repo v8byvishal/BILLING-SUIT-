@@ -28,7 +28,9 @@ const api = Object.freeze({
     getStatus: () => call(OPERATIONS.STORAGE_GET_STATUS),
     openRoot: () => call(OPERATIONS.STORAGE_OPEN_ROOT),
     openFolder: (name) => call(OPERATIONS.STORAGE_OPEN_FOLDER, { name }),
-    listRecent: () => call(OPERATIONS.STORAGE_LIST_RECENT)
+    listRecent: () => call(OPERATIONS.STORAGE_LIST_RECENT),
+    listSourceBills: () => call(OPERATIONS.STORAGE_LIST_SOURCE_BILLS),
+    getUsageSummary: () => call(OPERATIONS.STORAGE_GET_USAGE)
   }),
   bill: Object.freeze({
     getCurrent: () => call(OPERATIONS.BILL_GET_CURRENT),

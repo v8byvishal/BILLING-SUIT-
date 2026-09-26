@@ -2,27 +2,27 @@
 
 CGHS Billing & Enhancement Suite V2 should feel like a professional hospital billing workstation: clear, calm, evidence-oriented, and safe under time pressure. It is not an AI-chat interface, decorative consumer application, or unverified automation console.
 
-For the Phase 1 shell-specific design record, see `docs/DESIGN.md`.
+For the Phase 2 shell-specific design record, see `docs/DESIGN.md`.
 
-## Phase 1 application shell
+## Current shell behavior
 
-The current desktop shell is implemented with vanilla HTML/CSS/JavaScript in:
+The desktop shell is implemented with vanilla HTML/CSS/JavaScript in:
 
 - `src/ui/index.html`
 - `src/ui/renderer.js`
 - `src/ui/styles.css`
 
-It uses a left navigation rail and a status-first content area.
+Phase 2 keeps the Phase 1 navigation and adds real external Storage visibility.
 
 Primary sections:
 
-1. **Dashboard** — application, Storage, active bill, enhancement, portal, and final-bill state.
-2. **Source Bills** — local source PDF selection and current source metadata.
+1. **Dashboard** — application state, Storage root, Storage health/manifest/write-probe state, active bill, enhancement, portal, and final-bill state.
+2. **Source Bills** — local source PDF selection, current source metadata, and persisted source-bill records loaded from `Storage/Source_Bills`.
 3. **Enhancement** — existing EnhancementPlan visibility and review summary, without rule changes.
-4. **Final Bill** — workspace structure for future final-bill composition, marked not started where unsupported.
-5. **Audit / History** — recent session history separate from stored artifacts.
-6. **Settings** — non-secret desktop settings.
-7. **Diagnostics** — safe technical status collection.
+4. **Final Bill** — workspace structure and access to `Storage/Final_Bills`; storage mechanism only, no fake final PDF generation.
+5. **Audit / History** — persistent audit records from `Storage/Audit` and safe links to Audit/Failures folders.
+6. **Settings** — non-secret settings under `Storage/Config` and actual Storage root display.
+7. **Diagnostics** — safe technical status including manifest, recovery, health, and usage information.
 
 ## Visual personality
 
@@ -47,31 +47,23 @@ Primary sections:
 | Primary hover | `#174665` | Main-action hover |
 | Success/ready | `#23785a` | Ready/success status |
 | Warning/review | `#8a6218` | Review and not-verified status |
-| Error | `#a13d3d` | Error status |
+| Error/corrupt/access failure | `#a13d3d` | Error, corrupt, read-only, and access-failure status |
 
 Status meaning must always include text and must not rely on color alone.
-
-## Typography
-
-The UI uses native system fonts:
-
-```css
-"Segoe UI", Arial, sans-serif
-```
-
-Body text is approximately 14px with operational tables using denser 12px text. Text below 11px should be limited to secondary labels and remain legible.
 
 ## Interaction rules
 
 - Renderer actions call `window.cghsSuite`; no direct Node, shell, Python, Selenium, or arbitrary filesystem access is permitted.
-- Selecting a new source bill starts a new `billSessionId` and clears active transient workspace state.
-- Portal readiness remains `NOT VERIFIED` in Phase 1.
+- Folder opening is limited to allowlisted Storage folder keys.
+- Selecting a new source bill persists source metadata/file first, starts a durable `billSessionId`, and clears active transient workspace state.
+- Resetting the current bill clears active UI/workflow state only; it never deletes persisted files, audit, failure, or session records.
+- Portal readiness remains `NOT VERIFIED` in Phase 2.
 - Unsupported capabilities are shown as not started or not enabled; the UI must not fake parser output, portal readiness, final PDFs, metrics, or dashboards.
-- Settings changes are persisted, but runtime Storage is not silently switched mid-session.
+- Settings changes are persisted as non-secret configuration; runtime Storage is not silently switched mid-session.
 
 ## Layout guidance
 
 - Preserve the global status strip so operators can always see application, Storage, bill, enhancement, portal, and final-bill state.
-- Keep wide evidence tables horizontally scrollable rather than hiding fields.
+- Keep persisted source and audit tables horizontally scrollable rather than hiding evidence fields.
 - Use clear empty states for unsupported or unavailable workflows.
 - Keep safe next actions visible, especially source PDF selection, diagnostics, and Storage inspection.

@@ -1,8 +1,8 @@
 # Architecture
 
-This repository is a local vanilla Electron/JavaScript desktop application. Phase 1 establishes the safe desktop foundation for CGHS Billing & Enhancement Suite V2 while preserving existing domain services, portal adapters, final-bill modules, and the legacy Python/Selenium executor.
+This repository is a local vanilla Electron/JavaScript desktop application. Phase 2 adds an authoritative external runtime persistence layer while preserving existing domain services, parser behavior, CGHS rules, portal adapters, final-bill logic, and the legacy Python/Selenium executor.
 
-For the Phase 1-specific architecture record, see `docs/ARCHITECTURE.md`.
+For detailed Phase 2 storage architecture, see `docs/ARCHITECTURE.md`, `docs/PHASE_02_IMPLEMENTATION.md`, and `docs/STORAGE_MIGRATION.md`.
 
 ## Runtime layering
 
@@ -13,30 +13,26 @@ Preload bridge (src/desktop/preload.js)
   ↓ declared IPC operation contract
 Electron main process (src/desktop/main.js)
   ↓ service orchestration
+StorageService (src/core/storage.js)
+  ↓ external Storage root outside application package
 Node domain services and adapters
   ↓ where already implemented
 Legacy Python/Selenium/CDP portal executor
 ```
 
-The renderer does not directly access Node filesystem APIs, shell commands, Python, Selenium, CGHS rule internals, or arbitrary Storage manipulation. Privileged operations must flow through the preload bridge and a declared IPC handler.
+The renderer does not directly access Node filesystem APIs, shell commands, Python, Selenium, CGHS rule internals, or arbitrary Storage manipulation. Privileged work must flow through the preload bridge and a declared IPC handler.
 
-## Phase 1 foundation modules
+## External Storage root
 
-| Area | Path | Responsibility |
-|---|---|---|
-| Storage | `src/core/storage.js` | External Storage resolution, canonical/compatibility folders, health probes, atomic writes. |
-| State | `src/core/application-state-store.js` | Serializable app state, `billSessionId`, and active-workspace isolation. |
-| Errors | `src/core/application-error.js` | Sanitized public errors and stable error codes. |
-| Settings | `src/core/settings-store.js` | Non-secret persisted settings outside the application package. |
-| Diagnostics | `src/services/diagnostics/diagnostics-service.js` | Safe runtime, Storage, Python, and app-state status reports. |
-| IPC contract | `src/desktop/ipc-contract.js` | Allowed operation names and request validation. |
-| IPC dispatcher | `src/desktop/phase1-ipc.js` | Fail-closed handler dispatch and public error serialization. |
-| Preload | `src/desktop/preload.js` | Context-isolated `window.cghsSuite` API and narrow transitional legacy wrappers. |
-| Shell | `src/ui/index.html`, `src/ui/renderer.js`, `src/ui/styles.css` | Professional Phase 1 navigation and status UI. |
+The canonical default root is resolved from Electron's standard application data location:
 
-## Storage model
+```text
+<ApplicationData>/CGHS-Billing-Suite/Storage
+```
 
-Phase 1 canonical folders:
+The resolver rejects paths inside the application package. Operational data must not silently fall back into the repository, Desktop, Downloads, Program Files, or the installed app directory.
+
+## Canonical Storage contract
 
 ```text
 Storage/
@@ -48,39 +44,81 @@ Storage/
   Config/
 ```
 
-Existing service folders remain supported for backward compatibility, including `Cases`, `Bills`, `Custom_Codes`, `Inbox`, `Reports`, `Logs`, `Supporting_Sections`, and legacy failure folders. Phase 1 does not rename or delete existing data.
+Compatibility folders remain present for existing services:
 
-Storage defaults to an external app-data location when no user path is configured and rejects paths inside the packaged application directory.
+```text
+Cases/
+Bills/
+Custom_Codes/
+Inbox/Initial/
+Inbox/Final/
+Logs/
+Reports/
+Supporting_Sections/
+Failed/
+```
 
-## State model
+These compatibility folders are documented and retained non-destructively until their consumers are migrated in a later controlled phase.
 
-The Phase 1 state store exposes a serializable state tree with:
+## StorageService responsibilities
 
-- app info/status;
-- storage health/status;
-- current bill and `billSessionId`;
-- enhancement status/plan/results;
-- final-bill status/source/output;
-- portal status;
-- settings;
-- diagnostics;
-- history;
-- transient UI state.
+`src/core/storage.js` exports `StorageService`, the authoritative runtime persistence abstraction. It owns:
 
-Every source bill selection starts a new `billSessionId`. Starting a new bill clears active enhancement, final-bill, validation, portal execution, and transient UI state while preserving audit/history and stored case artifacts.
+- root resolution and package-directory rejection;
+- canonical/compatibility directory creation;
+- real health checks with read/write/temp create/remove verification;
+- manifest creation/reload at `Storage/Config/storage-manifest.json`;
+- atomic file/JSON writes through temp + fsync + rename;
+- corruption detection and preservation of invalid JSON artifacts;
+- source bill import under `Storage/Source_Bills/<billSessionId>/`;
+- SHA-256 and size integrity checks;
+- duplicate source detection by SHA-256;
+- bill-session registry under `Storage/Config/bill-sessions/`;
+- final bill placeholder/storage mechanism under `Storage/Final_Bills/<billSessionId>/`;
+- structured audit/failure records;
+- application-generated temp cleanup and startup recovery summaries;
+- allowlisted folder opening and on-demand usage summaries.
+
+## Persistent records
+
+### Source bill
+
+`Storage/Source_Bills/<billSessionId>/metadata.json` stores only import facts: schema version, session/source id, original filename, stored filename, import time, file size, SHA-256, MIME type, and import status. Parser-derived patient, bill, date, page, and section information is not fabricated by storage.
+
+### Bill session
+
+`Storage/Config/bill-sessions/<billSessionId>.json` stores source/final/plan paths and durable workflow status. It does not store renderer state, BrowserWindow objects, Selenium handles, process handles, credentials, cookies, or tokens.
+
+### Audit and failure
+
+Audit records are JSON lines in `Storage/Audit/audit-YYYY-MM-DD.jsonl`. Failure records are JSON files in `Storage/Failures/`. Messages and diagnostic fields are sanitized to avoid secrets.
+
+## Status semantics
+
+Storage health uses explicit statuses:
+
+- `NOT_INITIALIZED`
+- `INITIALIZING`
+- `READY`
+- `READ_ONLY`
+- `ACCESS_ERROR`
+- `CORRUPT`
+- `ERROR`
+
+Operational outcomes distinguish `SUCCESS`, `DUPLICATE`, `DUPLICATE_SOURCE_BILL`, `NOT_FOUND`, `INVALID`, `CORRUPT`, `READ_ONLY`, `ACCESS_ERROR`, and `IO_ERROR` rather than collapsing failures to `false`, `null`, or empty arrays.
 
 ## IPC and preload policy
 
-The Phase 1 IPC channel is `cghs-suite:operation`. Unsupported operations are rejected before handler dispatch. The contract intentionally does not expose generic command execution, arbitrary Python execution, arbitrary Node execution, shell execution, JavaScript eval, unrestricted filesystem access, or credential storage.
+The Phase 2 IPC channel remains controlled by `src/desktop/ipc-contract.js`. Storage operations added in Phase 2 include source-record listing and usage summary. Folder opening is allowlisted by folder key; there is no generic shell execution API.
 
 ## Preserved business boundaries
 
-Phase 1 does not change:
+Phase 2 does not change:
 
-- CGHS rule and mapping semantics;
-- source parser semantics;
+- CGHS mapping/rule semantics;
+- parser semantics;
 - portal duplicate prevention, portal quantity reconciliation, speciality logic, locked quantity handling, Selenium workflow, or CDP behavior;
 - final-bill business logic;
 - legacy Python executor ownership of browser automation.
 
-Portal readiness is reported as `NOT VERIFIED` until authenticated validation exists.
+Portal readiness is still `NOT VERIFIED` until authenticated validation exists.

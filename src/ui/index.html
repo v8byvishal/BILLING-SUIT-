@@ -58,6 +58,7 @@
             <div class="panel-head"><h2>Operational state</h2><span id="dashboardState">Loading</span></div>
             <dl class="details">
               <div><dt>Storage root</dt><dd id="dashboardStoragePath">—</dd></div>
+              <div><dt>Storage health</dt><dd id="dashboardStorageHealth">—</dd></div>
               <div><dt>Current bill session</dt><dd id="dashboardSession">NONE</dd></div>
               <div><dt>Current bill</dt><dd id="dashboardBill">No source bill loaded.</dd></div>
               <div><dt>Enhancement</dt><dd id="dashboardEnhancement">No EnhancementPlan available.</dd></div>
@@ -96,6 +97,13 @@
             <div><dt>Patient / identifiers</dt><dd id="sourceIdentifiers">—</dd></div>
             <div><dt>Detected sections</dt><dd id="sourceSections">—</dd></div>
           </dl>
+          <h3>Persisted Source Bills</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Imported</th><th>billSessionId</th><th>Original file</th><th>Status</th><th>SHA-256</th></tr></thead>
+              <tbody id="sourceRecordRows"></tbody>
+            </table>
+          </div>
         </article>
       </section>
 
@@ -139,6 +147,7 @@
       <section class="view" id="view-history" data-title="Audit / History">
         <article class="panel">
           <div class="panel-head"><div><h2>Audit / History</h2><p>Live state is separate from historical audit records.</p></div><span id="historyCount">0 records</span></div>
+          <div class="actions"><button id="openAuditFolder" type="button">Open Audit</button><button id="openFailuresFolder" type="button">Open Failures</button></div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Timestamp</th><th>billSessionId</th><th>Operation</th><th>Status</th><th>Error</th></tr></thead>
