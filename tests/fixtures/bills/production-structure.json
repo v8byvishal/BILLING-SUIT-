@@ -1,0 +1,19 @@
+{
+  "case_id": "synthetic-production-structure",
+  "source": {"file_name":"synthetic-production-structure.pdf","sha256":"synthetic-not-a-real-pdf"},
+  "pages": [
+    {"page_number":1,"lines":["Bill No: SYN-500","Patient Name: FIXTURE PATIENT","Investigations","Service: Test A | Code: B126 | Qty: 2","Description: historical reference code B075 only","IP Pharmacy","Service: Primary medicine | Code: B126 | Qty: 3"],"raw_text":"Bill No: SYN-500\nPatient Name: FIXTURE PATIENT\nInvestigations\nService: Test A | Code: B126 | Qty: 2\nDescription: historical reference code B075 only\nIP Pharmacy\nService: Primary medicine | Code: B126 | Qty: 3"},
+    {"page_number":2,"lines":["IP Pharmacy","Service: Primary continuation | Code: B126 | Qty: 4","Room Rent","Service: Printed raw special | Code: CN002 | Qty: 99","Bed Details","01/09/2026 02/09/2026 1 days ICU-1 ICU","02/09/2026 03/09/2026 1 days W-1 General Ward"],"raw_text":"IP Pharmacy\nService: Primary continuation | Code: B126 | Qty: 4\nRoom Rent\nService: Printed raw special | Code: CN002 | Qty: 99\nBed Details\n01/09/2026 02/09/2026 1 days ICU-1 ICU\n02/09/2026 03/09/2026 1 days W-1 General Ward"},
+    {"page_number":3,"lines":["Patient Payable","IP Pharmacy","Service: Patient medicine | Code: B126 | Qty: 50","Patient Payable Total: 5000","Investigations","Service: Wrapped package | CGHS Code: B068+","L / B075+L / B126 | Qty: 1","Service: Missing code advisory | Qty: 2","Code: ??? | Qty: 1"],"raw_text":"Patient Payable\nIP Pharmacy\nService: Patient medicine | Code: B126 | Qty: 50\nPatient Payable Total: 5000\nInvestigations\nService: Wrapped package | CGHS Code: B068+\nL / B075+L / B126 | Qty: 1\nService: Missing code advisory | Qty: 2\nCode: ??? | Qty: 1"},
+    {"page_number":4,"lines":["Investigations","Service: OCR spaced code | Code: B 126 | Qty: 1","Service: Numeric compound | Code: B042+043+044 | Qty: 1"],"raw_text":"Investigations\nService: OCR spaced code | Code: B 126 | Qty: 1\nService: Numeric compound | Code: B042+043+044 | Qty: 1"}
+  ],
+  "expected": {
+    "primary_ip_pharmacy_quantity":7,
+    "excluded_patient_payable_quantity":50,
+    "investigation_b126_quantity":3,
+    "derived":{"CN002":5,"CC001":1,"WC001":1},
+    "review_reasons":["POSSIBLY_MISSING_CODE"],
+    "invalid_records":1,
+    "false_positive":"B075"
+  }
+}

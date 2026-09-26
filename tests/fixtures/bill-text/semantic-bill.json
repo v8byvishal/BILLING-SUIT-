@@ -1,0 +1,40 @@
+{
+  "source": {
+    "file_path": "/fixtures/semantic-bill.pdf",
+    "file_name": "semantic-bill.pdf",
+    "byte_size": 1234,
+    "sha256": "fixture-not-a-real-pdf"
+  },
+  "pages": [
+    {
+      "page_number": 1,
+      "raw_text": "Patient Name: TEST PATIENT\nUHID: UH12345\nIP No: IP9988\nBill No: BILL-42\nAdmission Date: 20/09/2026\nDischarge Date: 22/09/2026\nIP Pharmacy\nService: Primary Medicine | Code: B126 | Qty: 2 | Amount: 200.00\nInvestigations\nService: Compound Investigation | CGHS Code: B068+L / B075+L / B126 | Qty: 1 | Amount: 300.00\nService: Repeat Investigation | Code: B126 | Qty: 3 | Amount: 150.00",
+      "lines": [
+        "Patient Name: TEST PATIENT",
+        "UHID: UH12345",
+        "IP No: IP9988",
+        "Bill No: BILL-42",
+        "Admission Date: 20/09/2026",
+        "Discharge Date: 22/09/2026",
+        "IP Pharmacy",
+        "Service: Primary Medicine | Code: B126 | Qty: 2 | Amount: 200.00",
+        "Investigations",
+        "Service: Compound Investigation | CGHS Code: B068+L / B075+L / B126 | Qty: 1 | Amount: 300.00",
+        "Service: Repeat Investigation | Code: B126 | Qty: 3 | Amount: 150.00"
+      ]
+    },
+    {
+      "page_number": 2,
+      "raw_text": "Bed Details\nFrom: 20/09/2026 | To: 21/09/2026 | Duration: 1 day | Bed No: ICU-01 | Category: ICU\nFrom: 21/09/2026 | To: 22/09/2026 | Duration: 1 day | Bed No: W-12 | Category: AC Multibeds\nPatient Payable\nIP Pharmacy\nService: Patient Payable Medicine | Code: B126 | Qty: 5 | Amount: 500.00\nPatient Payable Total: 500.00",
+      "lines": [
+        "Bed Details",
+        "From: 20/09/2026 | To: 21/09/2026 | Duration: 1 day | Bed No: ICU-01 | Category: ICU",
+        "From: 21/09/2026 | To: 22/09/2026 | Duration: 1 day | Bed No: W-12 | Category: AC Multibeds",
+        "Patient Payable",
+        "IP Pharmacy",
+        "Service: Patient Payable Medicine | Code: B126 | Qty: 5 | Amount: 500.00",
+        "Patient Payable Total: 500.00"
+      ]
+    }
+  ]
+}

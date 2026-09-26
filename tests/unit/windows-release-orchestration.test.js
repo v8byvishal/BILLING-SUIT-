@@ -1,0 +1,23 @@
+'use strict';const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const {createReleaseManifest,fileSha256}=require('../../src/core/release-tools');const pkg=require('../../package.json');
+const root=path.resolve(__dirname,'../..'),script=fs.readFileSync(path.join(root,'scripts/build-windows-release.ps1'),'utf8'),verify=fs.readFileSync(path.join(root,'scripts/verify-release.js'),'utf8');
+function tmp(){return fs.mkdtempSync(path.join(os.tmpdir(),'release-orch-'));}
+test('P15-01 script resolves repository from its own location',()=>assert.match(script,/Resolve-Path \(Join-Path \$PSScriptRoot '\.\.'\)/));
+test('P15-02 repository-root required files are validated',()=>assert.match(script,/REQUIRED_SOURCE_MISSING/));
+test('P15-03 unsupported OS fails fast',()=>{assert.match(script,/PlatformID]::Win32NT/);assert.match(script,/WINDOWS_BUILD_REQUIRED/);});
+test('P15-04 missing Node fails clearly',()=>assert.match(script,/Require-Command 'node' 'MISSING_NODE'/));
+test('P15-05 missing Python fails clearly',()=>assert.match(script,/Require-Command 'py' 'MISSING_PYTHON'/));
+test('P15-06 required legacy sources are checked',()=>{for(const f of ['app (1).py','portal_bridge.py','portal_execution_core.py'])assert.ok(script.includes(f));});
+test('P15-07 cleanup is limited to generated outputs',()=>assert.match(script,/@\('dist','release','build-resources\/python-executor'\)/));
+test('P15-08 cleanup explicitly protects external data names',()=>{for(const n of ['Storage','Cases','Bills','Inbox','Custom_Codes','Audit'])assert.ok(script.includes(n));assert.doesNotMatch(script,/Remove-Item[^\n]*(Storage|Cases|Bills|Inbox|Custom_Codes|Audit)/);});
+test('P15-09 failed test gate stops release',()=>{assert.match(script,/Invoke-Gate 'TEST_GATE'/);assert.match(script,/if\(\$LASTEXITCODE -ne 0\).*Fail/s);});
+test('P15-10 missing Python executor stops release',()=>assert.match(script,/PYTHON_EXECUTOR_UNAVAILABLE/));
+test('P15-11 missing Electron artifact stops release',()=>assert.match(script,/ELECTRON_ARTIFACT_MISSING/));
+test('P15-12 missing manifest stops verification',()=>assert.match(verify,/Missing release-manifest\.json/));
+test('P15-13 hash mismatch fails verification',()=>assert.match(verify,/Hash mismatch/));
+test('P15-14 version mismatch fails verification',()=>assert.match(verify,/Version mismatch/));
+test('P15-15 immutable rate snapshot hash is gated',()=>assert.match(script,/b606c25a035d0b49f433741655c64ca0e019e9fc701d3b534968361804d1a5ba/));
+test('P15-16 acceptance report has exact status categories',()=>{for(const s of ['SOURCE TESTING','BUILD VALIDATION','WINDOWS RUNTIME VALIDATION','CLEAN-MACHINE VALIDATION','REAL PDF REGRESSION','LIVE PORTAL VALIDATION'])assert.ok(script.includes(s));});
+test('P15-17 hashes derive from actual files only',()=>{assert.match(script,/Get-FileHash \$artifact/);assert.match(script,/Get-FileHash \$executor/);assert.doesNotMatch(script,/artifactHash\s*=\s*['"][a-f0-9]{64}/i);});
+test('P15-18 release candidate is withheld pending runtime',()=>assert.match(script,/WINDOWS RELEASE CANDIDATE = NOT ESTABLISHED/));
+test('P15-19 manifest includes actual Python executor hash',()=>{const d=tmp(),a=path.join(d,'app.exe'),p=path.join(d,'portal-executor.exe');fs.writeFileSync(a,'app');fs.writeFileSync(p,'python');const m=createReleaseManifest({buildInfo:{application_version:pkg.version},artifacts:[a],pythonExecutor:p,outputDir:d});assert.equal(m.python_executor_artifact.sha256,fileSha256(p));});
+test('P15-20 workflow invokes canonical one-command script',()=>{const workflow=fs.readFileSync(path.join(root,'.github/workflows/windows-release.yml'),'utf8');assert.match(workflow,/build-windows-release\.ps1/);});

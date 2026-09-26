@@ -1,0 +1,8 @@
+'use strict';
+const fs=require('node:fs');const path=require('node:path');
+const {ingestBillPdf}=require('../src/services/bill-ingestion');const {createBundledRateRepository,evaluateBill}=require('../src/services/cghs');const {validateBill,summarizeValidation}=require('../src/services/validation/bill-validator');
+const root=process.env.VNEXT_REAL_FIXTURES||path.join(__dirname,'..','tests','fixtures','bills','real');
+(async()=>{if(!fs.existsSync(root)){console.log('REAL PDF REGRESSION = NOT RUN — SOURCE PDFs NOT AVAILABLE');return;}
+const cases=fs.readdirSync(root).sort().map(name=>path.join(root,name)).filter(file=>fs.statSync(file).isDirectory());let ran=0,failed=0;
+for(const dir of cases){const expectedFile=path.join(dir,'expected.json');const pdfs=fs.readdirSync(dir).filter(name=>/\.pdf$/i.test(name));if(!fs.existsSync(expectedFile)||pdfs.length!==1)continue;const fixture=JSON.parse(fs.readFileSync(expectedFile));if(fixture.metadata?.privacy_approval_status!=='APPROVED'){console.log(`${fixture.fixture_id||path.basename(dir)}: NOT RUN — PRIVACY APPROVAL REQUIRED`);continue;}const bill=await ingestBillPdf(path.join(dir,pdfs[0]));const plan=evaluateBill(bill,createBundledRateRepository());const report=validateBill({fixture,bill,plan,runId:`real-${fixture.fixture_id}`});fs.writeFileSync(path.join(dir,'actual-report.json'),`${JSON.stringify(report,null,2)}\n`);console.log(summarizeValidation(report));ran++;if(report.status!=='PASS')failed++;}
+if(!ran)console.log('REAL PDF REGRESSION = NOT RUN — SOURCE PDFs NOT AVAILABLE');else{console.log(`REAL PDF REGRESSION = RUN — ${ran} fixture(s), ${failed} requiring review`);if(failed)process.exitCode=1;}})().catch(error=>{console.error(error.stack||error);process.exitCode=1;});

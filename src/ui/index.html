@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>CGHS Billing Suite VNEXT</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">CGHS BILLING SUITE</p>
+        <h1>VNEXT</h1>
+      </div>
+      <div class="status"><span class="dot"></span><span id="readyStatus">Starting…</span></div>
+    </header>
+
+    <section class="welcome" aria-labelledby="welcomeTitle">
+      <div class="copy">
+        <p class="phase">DETERMINISTIC RULES · PHASE 3</p>
+        <h2 id="welcomeTitle">Inspect a local enhancement plan.</h2>
+        <p>Select a hospital bill PDF to parse it once and evaluate local deterministic code/rule results. The bundled rates are an unverified HFOS reference snapshot, not confirmed official authority. Nothing is sent to a portal.</p>
+        <button class="primary-action" id="selectBill" type="button">Select PDF</button>
+      </div>
+      <dl class="readiness">
+        <div><dt>Application</dt><dd id="appState">Checking</dd></div>
+        <div><dt>External Storage</dt><dd id="storageState">Checking</dd></div>
+        <div><dt>Environment</dt><dd id="environment">Checking</dd></div>
+      </dl>
+    </section>
+
+    <section class="plan-view" id="caseView" aria-labelledby="caseTitle">
+      <div class="plan-head"><div><h3 id="caseTitle">Operational cases</h3><p>One persistent case controls the current bill and browser context.</p></div><span id="currentCaseStatus">NO ACTIVE CASE</span></div>
+      <div class="final-actions"><button id="scanInitialInbox" type="button">Scan Initial inbox</button><button id="scanFinalInbox" type="button">Scan Final inbox</button><button id="confirmVerification" type="button" hidden>Confirm verification</button><button id="confirmDischarge" type="button" hidden>Confirm manual discharge</button></div>
+      <div class="final-actions" aria-label="Automatic inbox intake"><strong>Automatic inbox intake: <span id="watcherStatus">STOPPED</span></strong><button id="watcherStart" type="button">Start</button><button id="watcherPause" type="button">Pause</button><button id="watcherResume" type="button">Resume</button><button id="watcherStop" type="button">Stop</button><span id="watcherInfo">No scan yet</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Case ID</th><th>Bill No</th><th>Status</th><th>Updated</th><th>Review</th><th>Action</th></tr></thead><tbody id="caseRows"></tbody></table></div>
+    </section>
+
+    <section class="parse-result" id="parseResult" hidden aria-live="polite">
+      <div><span>Status</span><strong id="parseStatus">IDLE</strong></div>
+      <div><span>File</span><strong id="parsedFile">—</strong></div>
+      <div><span>Pages</span><strong id="parsedPages">0</strong></div>
+      <div><span>Primary items</span><strong id="parsedItems">0</strong></div>
+      <div><span>Excluded sections</span><strong id="excludedSections">0</strong></div>
+      <p id="parseMessage"></p>
+    </section>
+
+    <section class="plan-view" id="planView" hidden aria-labelledby="planTitle">
+      <div class="plan-head"><div><h3 id="planTitle">Deterministic enhancement plan</h3><p id="rateSource">Rate source —</p></div><span id="planWarning">Review required</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Code</th><th>Quantity</th><th>Rate</th><th>Amount</th><th>Source / Rule</th><th>Status</th></tr></thead><tbody id="planRows"></tbody></table></div>
+    </section>
+
+    <section class="plan-view" id="validationView" hidden aria-labelledby="validationTitle">
+      <div class="plan-head"><div><h3 id="validationTitle">Bill validation</h3><p>Compare the current one-pass bill/plan artifacts with a reviewed, versioned expected baseline.</p></div><span id="validationStatus">NOT RUN</span></div>
+      <div class="final-actions"><button id="runValidation" type="button">Select expected JSON and validate</button><button id="confirmValidationPlan" type="button">Confirm reviewed plan</button><button id="addValidationNote" type="button">Add operator note</button><span id="validationSummary">No validation report loaded.</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Type</th><th>Code</th><th>Expected</th><th>Actual</th><th>Section/Page</th><th>Reason</th><th>Decision</th></tr></thead><tbody id="validationRows"></tbody></table></div>
+      <pre id="validationEvidence" hidden></pre>
+    </section>
+
+    <section class="plan-view" id="reviewView" hidden aria-labelledby="reviewTitle">
+      <div class="plan-head"><div><h3 id="reviewTitle">Enhancement review</h3><p>Unknown, unresolved, malformed, and advisory records require an explicit decision.</p></div><span id="reviewCount">0 open</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Code / Raw text</th><th>Section / Page</th><th>Qty</th><th>Status</th><th>Reason</th><th>Actions</th></tr></thead><tbody id="reviewRows"></tbody></table></div>
+      <form id="customCodeForm" class="registry-form" hidden>
+        <input id="customCode" required placeholder="Code" aria-label="Custom code">
+        <input id="customDescription" required placeholder="Description" aria-label="Description">
+        <select id="customQuantityBehavior" aria-label="Quantity behavior"><option>MANUAL</option><option>FIXED</option><option>PER_DAY</option></select>
+        <input id="customFixedQuantity" type="number" min="1" step="1" placeholder="Fixed quantity" aria-label="Fixed quantity">
+        <input id="customReason" required placeholder="Reason" aria-label="Reason">
+        <input id="customSource" required placeholder="Source / reference" aria-label="Source or reference">
+        <input id="customOperator" required placeholder="Operator identifier" aria-label="Operator identifier">
+        <input id="customRate" type="number" min="0" step="0.01" placeholder="Rate (optional)" aria-label="Optional rate">
+        <label><input id="customOverride" type="checkbox"> Explicit reference override</label>
+        <button class="primary-action" type="submit">Save custom code</button>
+        <button id="cancelCustomCode" type="button">Cancel</button>
+      </form>
+    </section>
+
+    <section class="plan-view" id="registryView" aria-labelledby="registryTitle">
+      <div class="plan-head"><div><h3 id="registryTitle">Custom code registry</h3><p id="registryVersion">Persistent local records · loading</p></div><input id="registrySearch" type="search" placeholder="Search code or description" aria-label="Search custom codes"></div>
+      <div class="table-wrap"><table><thead><tr><th>Code</th><th>Description</th><th>Type</th><th>Status</th><th>Source</th><th>Updated</th><th>Actions</th></tr></thead><tbody id="registryRows"></tbody></table></div>
+      <pre id="customAudit" hidden></pre>
+    </section>
+
+    <section class="plan-view" id="portalView" hidden aria-labelledby="portalTitle">
+      <div class="plan-head"><div><h3 id="portalTitle">Portal execution boundary</h3><p>Uses the existing authenticated Chrome session at 127.0.0.1:9222. Login is never automated.</p></div><span id="portalStatus">PREVIEW</span></div>
+      <p id="portalSummary">Prepare actions to inspect executable and blocked records.</p>
+      <button class="primary-action" id="preparePortal" type="button">Prepare portal actions</button>
+      <button class="primary-action" id="executePortal" type="button" disabled>Execute verified actions</button>
+      <pre id="portalAudit" hidden></pre>
+    </section>
+
+    <section class="plan-view" id="finalBillView" aria-labelledby="finalBillTitle">
+      <div class="plan-head"><div><h3 id="finalBillTitle">Final bill after manual discharge</h3><p>Local parsing and completed-package storage only. This does not perform discharge or portal upload.</p></div><span id="finalBillStatus">NOT LOADED</span></div>
+      <div class="final-actions"><label><input id="manualDischargeConfirmed" type="checkbox"> I confirm portal verification and discharge were completed manually</label><button class="primary-action" id="loadFinalBill" type="button" disabled>Load final bill</button><button id="resolveFinalMatch" type="button" hidden>Resolve match</button><button class="primary-action" id="saveCompletedBill" type="button" disabled>Save completed bill</button></div>
+      <p id="finalBillMessage">Load an initial bill first.</p>
+      <div class="table-wrap"><table><thead><tr><th>Section</th><th>Item</th><th>Code</th><th>Quantity</th><th>Page</th><th>Status</th></tr></thead><tbody id="finalBillRows"></tbody></table></div>
+    </section>
+
+    <section class="future" aria-label="Workflow boundaries">
+      <h3>Workflow boundaries</h3>
+      <p>Parsing, deterministic planning, and the controlled legacy portal boundary are available. Later workflow modules remain inactive.</p>
+      <div class="areas">
+        <article><span>01</span><h4>Bill ingestion</h4><p>Phase 2 parser available</p></article>
+        <article><span>02</span><h4>Rule evaluation</h4><p>Phase 3 local plan available</p></article>
+        <article><span>03</span><h4>Final bill workflow</h4><p>Not implemented</p></article>
+        <article><span>04</span><h4>Settings</h4><p>Foundation only</p></article>
+      </div>
+    </section>
+
+    <footer><span id="version">Version —</span><span id="storagePath">Storage path unavailable</span></footer>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

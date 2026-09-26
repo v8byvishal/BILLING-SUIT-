@@ -1,0 +1,6 @@
+'use strict';
+const fs=require('node:fs');const path=require('node:path');
+const CURRENT_SCHEMA_VERSION=1;
+function mergeDefaults(defaults,user){const merged={...defaults,...user,logging:{...(defaults.logging||{}),...(user.logging||{})},features:{...(defaults.features||{}),...(user.features||{})},automaticInboxWatch:{...(defaults.automaticInboxWatch||{}),...(user.automaticInboxWatch||{})}};merged.configSchemaVersion=CURRENT_SCHEMA_VERSION;return merged;}
+function ensureUserConfig(file,defaults){fs.mkdirSync(path.dirname(file),{recursive:true});if(!fs.existsSync(file)){const value=mergeDefaults(defaults,{});fs.writeFileSync(file,`${JSON.stringify(value,null,2)}\n`,{flag:'wx',mode:0o600});return{value,created:true,migrated:false};}const existing=JSON.parse(fs.readFileSync(file,'utf8')),value=mergeDefaults(defaults,existing),migrated=existing.configSchemaVersion!==CURRENT_SCHEMA_VERSION||JSON.stringify(value)!==JSON.stringify(existing);if(migrated){const temp=`${file}.${process.pid}.tmp`;fs.writeFileSync(temp,`${JSON.stringify(value,null,2)}\n`,{mode:0o600});fs.renameSync(temp,file);}return{value,created:false,migrated};}
+module.exports={CURRENT_SCHEMA_VERSION,mergeDefaults,ensureUserConfig};

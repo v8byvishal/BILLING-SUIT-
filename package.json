@@ -1,12 +1,71 @@
 {
-  "name": "cghs-billing-suite-pro",
-  "productName": "CGHS Billing Suite Pro",
+  "name": "cghs-billing-suite-vnext",
+  "productName": "CGHS Billing Suite VNEXT",
   "version": "5.0.0-rc.1",
-  "description": "Offline hospital billing system with CGHS rate verification, financial integrity engine and AI validation",
-  "main": "main.js",
+  "description": "Foundation desktop shell for the controlled evolution of the CGHS Billing Suite",
+  "main": "src/desktop/main.js",
   "author": "CGHS Back Office",
   "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dev": "VNEXT_ENV=development electron .",
+    "test": "node --test tests/unit/*.test.js tests/integration/*.test.js",
+    "test:desktop": "node scripts/smoke-test.js",
+    "test:real-bills": "node scripts/real-bill-regression.js",
+    "test:all": "npm test && npm run test:desktop",
+    "build:dir": "electron-builder --dir",
+    "build:win": "npm run build:identity && node scripts/check-python-executor.js && electron-builder --win portable --x64",
+    "build:identity": "node scripts/generate-build-info.js",
+    "build:python:win": "pyinstaller --clean --noconfirm packaging/portal-executor.spec && node -e \"require('fs').mkdirSync('build-resources/python-executor',{recursive:true});require('fs').copyFileSync('dist/portal-executor.exe','build-resources/python-executor/portal-executor.exe')\"",
+    "release:manifest": "node scripts/generate-release-manifest.js",
+    "release:verify": "node scripts/verify-release.js",
+    "release:win": "npm run build:win && npm run release:manifest && npm run release:verify"
+  },
   "dependencies": {
+    "pdfjs-dist": "4.10.38",
     "sql.js": "1.13.0"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "25.1.8",
+    "pdf-lib": "1.17.1"
+  },
+  "build": {
+    "appId": "in.cghsbilling.vnext",
+    "productName": "CGHS Billing Suite VNEXT",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "config/default.json",
+      "package.json",
+      "node_modules/sql.js/**/*",
+      "node_modules/pdfjs-dist/**/*"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "artifactName": "CGHS-Billing-Suite-VNEXT-${version}-${arch}.${ext}"
+    },
+    "extraResources": [
+      {
+        "from": "config/default.json",
+        "to": "config/default.json"
+      },
+      {
+        "from": "build-resources/build-info.json",
+        "to": "build-info.json"
+      },
+      {
+        "from": "build-resources/python-executor",
+        "to": "python-executor",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

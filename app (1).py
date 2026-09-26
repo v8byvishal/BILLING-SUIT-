@@ -4,7 +4,16 @@ import re
 import time
 import json
 import traceback
+import importlib.util
 from datetime import datetime
+
+# Phase 10: shared deterministic matching core; Selenium remains in this legacy file.
+_core_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "adapters", "legacy-portal", "portal_execution_core.py")
+_core_spec = importlib.util.spec_from_file_location("portal_execution_core", _core_path)
+_portal_core = importlib.util.module_from_spec(_core_spec)
+_core_spec.loader.exec_module(_portal_core)
+option_matches_exact_code = _portal_core.option_matches_exact_code
+row_matches_exact_code = _portal_core.row_matches_exact_code
 from typing import List, Dict, Tuple, Optional, Any
 import fitz
 from PyQt5.QtWidgets import (
@@ -1150,7 +1159,7 @@ class ProcedureSelector:
                         continue
                     txt = (opt.text or "").strip()
                     up = txt.upper()
-                    if code.upper() in up or portal_target.upper() in up:
+                    if option_matches_exact_code(txt, code, portal_target):
                         matched_option = opt
                         break
                 except Exception:
@@ -1171,7 +1180,7 @@ class ProcedureSelector:
         def proc_verified(drv):
             try:
                 v = el.get_attribute("value") or ""
-                return code.upper() in v.upper() or portal_target.upper() in v.upper()
+                return option_matches_exact_code(v, code, portal_target)
             except:
                 return False
         try:
@@ -1556,7 +1565,7 @@ class RowCodeQtyVerifier:
             if len(rows) > initial_rows:
                 for row in rows[initial_rows:]:
                     code_text, qty_text = self._extract_row_text(row)
-                    if expected_code.upper() in code_text.upper() or ("DRUG100"==expected_code.upper() and "DRGU100" in code_text.upper()) or ("CNSU100"==expected_code.upper() and "CNSU100" in code_text.upper()):
+                    if row_matches_exact_code(code_text, expected_code):
                         if str(expected_qty) == qty_text.strip() or (expected_qty==1 and qty_text.strip()==""):
                             self.logger.info(f"[UI VERIFY PASS] {expected_code} qty {expected_qty}")
                             return True
@@ -1587,6 +1596,7 @@ class TreatmentPlanOrchestrator:
         self.current_bill_id = None
         self.unit_states = {}
         self.tx_dispatch_registry = {}  # transaction_id -> {count, state, ts, dispatch_count}
+        self.last_item_outcome = None  # Phase 4 structured adapter result; browser behavior unchanged
 
     def _get_tx_id(self, code: str, unit_idx: int) -> str:
         bill = self.current_bill_id or "current"
@@ -1632,7 +1642,7 @@ class TreatmentPlanOrchestrator:
             total = 0
             for row in rows:
                 ct, qt = self.row_verifier._extract_row_text(row)
-                if code.upper() in ct.upper() or ("DRUG100"==code.upper() and "DRGU100" in ct.upper()):
+                if row_matches_exact_code(ct, code):
                     try:
                         total += int(qt.strip()) if qt.strip().isdigit() else 1
                     except:
@@ -1710,7 +1720,7 @@ class TreatmentPlanOrchestrator:
             cnt = 0
             for r in rows:
                 ct, qt = self.row_verifier._extract_row_text(r)
-                if code.upper() in ct.upper() or ("DRUG100"==code.upper() and "DRGU100" in ct.upper()):
+                if row_matches_exact_code(ct, code):
                     try:
                         cnt += int(qt.strip()) if qt.strip().isdigit() else 1
                     except:
@@ -1759,7 +1769,7 @@ class TreatmentPlanOrchestrator:
             portal_qty = 0
             for row in rows:
                 ct, qt = self.row_verifier._extract_row_text(row)
-                if code.upper() in ct.upper() or ("DRUG100"==code.upper() and "DRGU100" in ct.upper()):
+                if row_matches_exact_code(ct, code):
                     try:
                         portal_qty += int(qt.strip()) if qt.strip().isdigit() else 1
                     except:
@@ -1811,8 +1821,8 @@ class TreatmentPlanOrchestrator:
                 if len(rows) > initial_rows:
                     for row in rows[initial_rows:]:
                         ct, qt = self.row_verifier._extract_row_text(row)
-                        if code.upper() in ct.upper() or ("DRUG100"==code.upper() and "DRGU100" in ct.upper()):
-                            if str(expected_verify_qty) in qt or (expected_verify_qty==1 and qt.strip()==""):
+                        if row_matches_exact_code(ct, code):
+                            if str(expected_verify_qty) == qt.strip() or (expected_verify_qty==1 and qt.strip()==""):
                                 self.logger.info(f"[TRACE] SUCCESS via new row {tx_id} qty={qt}")
                                 commit_verified = True
                                 break
@@ -1891,7 +1901,7 @@ class TreatmentPlanOrchestrator:
             portal_count = 0
             for r in rows:
                 ct, qt = self.row_verifier._extract_row_text(r)
-                if code.upper() in ct.upper() or ("DRUG100"==code.upper() and "DRGU100" in ct.upper()):
+                if row_matches_exact_code(ct, code):
                     try:
                         portal_count += int(qt.strip()) if qt.strip().isdigit() else 1
                     except:
@@ -1901,6 +1911,7 @@ class TreatmentPlanOrchestrator:
                 for u in range(1, required_qty+1):
                     self._mark_state(code, u, "COMPLETED")
                 self.last_code = code
+                self.last_item_outcome = {"status": "EXECUTED", "verification": "PORTAL_ROW_VERIFIED"}
                 return True
             completed = portal_count
             if completed>0:
@@ -1915,7 +1926,7 @@ class TreatmentPlanOrchestrator:
                 cur_count = 0
                 for r in rows:
                     ct, qt = self.row_verifier._extract_row_text(r)
-                    if code.upper() in ct.upper():
+                    if row_matches_exact_code(ct, code):
                         try:
                             cur_count += int(qt.strip()) if qt.strip().isdigit() else 1
                         except:
@@ -1951,7 +1962,7 @@ class TreatmentPlanOrchestrator:
                         cur = 0
                         for r in rows:
                             ct,_ = self.row_verifier._extract_row_text(r)
-                            if code.upper() in ct.upper():
+                            if row_matches_exact_code(ct, code):
                                 cur += 1
                         if cur >= unit_idx:
                             completed += 1
@@ -1968,7 +1979,7 @@ class TreatmentPlanOrchestrator:
                     cur = 0
                     for r in rows:
                         ct,_ = self.row_verifier._extract_row_text(r)
-                        if code.upper() in ct.upper():
+                        if row_matches_exact_code(ct, code):
                             cur += 1
                     if cur >= unit_idx:
                         self.logger.info(f"[LOCKED-QTY-RECONCILED-EXC] {code} U{unit_idx} portal success continue")
@@ -1983,6 +1994,8 @@ class TreatmentPlanOrchestrator:
 
     def process_item(self, item: Dict[str, Any]) -> bool:
         code = item["code"]
+        self.last_item_outcome = None
+        self.last_item_metrics = {"search_ms": 0, "selection_ms": 0, "speciality_ms": 0, "quantity_ms": 0, "verification_ms": 0, "total_ms": 0}
         qty = item.get("qty", 1)
         amount = item.get("amount")
         is_amount_based = amount is not None or code.upper() in ["DRUG100","CNSU100"]
@@ -1996,16 +2009,21 @@ class TreatmentPlanOrchestrator:
         if self._is_code_already_in_portal(code, bill_qty if not is_amount_based else 1):
             self.logger.info(f"[DUP-GUARD-ENTRY] {code} already portal SKIP")
             self.last_code = code
+            self.last_item_metrics["total_ms"] = int((time.time()-t_overall)*1000)
+            self.last_item_outcome = {"status": "ALREADY_PRESENT", "verification": "PORTAL_ROW_RECONCILED", "metrics": self.last_item_metrics}
             return True
         t_proc = time.time()
         self.proc_sel.execute(code)
-        self.logger.info(f"[PERF] Proc input->selected: {int((time.time()-t_proc)*1000)}ms")
+        self.last_item_metrics["search_ms"] = int((time.time()-t_proc)*1000)
+        self.logger.info(f"[PERF] Proc input->selected: {self.last_item_metrics['search_ms']}ms")
+        t_speciality = time.time()
         try:
             self.spec_sync.execute(timeout=3.0)
         except Exception as e:
             self.logger.info(f"[SPECIALITY-RECOVERY] init fail {code} {e} X recovery")
             if not self._reconcile_speciality_lock(code):
                 raise
+        self.last_item_metrics["speciality_ms"] = int((time.time()-t_speciality)*1000)
         self.logger.info(f"[PERF] Proc selected->Qty ready timing check")
         is_locked = False
         try:
@@ -2029,14 +2047,22 @@ class TreatmentPlanOrchestrator:
                 return True
             else:
                 raise ValueError(f"Amount-based {code} fail")
+        t_quantity = time.time()
         if is_locked:
-            return self._process_locked_quantity(item, bill_qty)
+            success = self._process_locked_quantity(item, bill_qty)
+            self.last_item_metrics["verification_ms"] = int((time.time()-t_quantity)*1000)
         else:
             self.qty_ctrl.execute(bill_qty)
+            self.last_item_metrics["quantity_ms"] = int((time.time()-t_quantity)*1000)
+            t_verify = time.time()
             success = self._process_editable_quantity(item, bill_qty)
+            self.last_item_metrics["verification_ms"] = int((time.time()-t_verify)*1000)
             self.logger.info(f"[PERF] Total {code}: {int((time.time()-t_overall)*1000)}ms")
             self.last_code = code
-            return success
+        self.last_item_metrics["total_ms"] = int((time.time()-t_overall)*1000)
+        if success:
+            self.last_item_outcome = {"status": "EXECUTED", "verification": "PORTAL_ROW_VERIFIED", "metrics": self.last_item_metrics}
+        return success
 
 class BatchAutomationThread(QThread):
     log_signal = pyqtSignal(str)
@@ -2048,10 +2074,17 @@ class BatchAutomationThread(QThread):
         self.delay_mode = delay_mode
         self.logger = EnterpriseLogger(self.log_signal)
         self._is_cancelled = False
+        self.execution_results = []  # structured Phase 4 audit, additive to existing logs/signals
+        self.execution_checkpoints = []
+        self.batch_metrics = {}
+        self.fatal_error = None
+        self.cdp_attempts = 0
     def stop(self):
         self._is_cancelled = True
         self.logger.warn("BatchThread: Cancellation")
     def run(self):
+        batch_started = time.time()
+        self.execution_checkpoints.append({"event": "RUN_STARTED", "timestamp": datetime.utcnow().isoformat() + "Z"})
         self.logger.info(f"BatchThread: Starting [{self.delay_mode}]...")
         self.logger.info("BatchThread: Connecting Chrome Debug 127.0.0.1:9222...")
         driver = None
@@ -2059,6 +2092,7 @@ class BatchAutomationThread(QThread):
             options = Options()
             options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
             for attempt in range(1, 4):
+                self.cdp_attempts = attempt
                 try:
                     driver = webdriver.Chrome(options=options)
                     self.logger.info("BatchThread: CDP connected")
@@ -2110,6 +2144,7 @@ class BatchAutomationThread(QThread):
                     code = code.upper() if code.lower() in ["drug100","cnsu100"] else code
                     if not should_add(code, bill_qty):
                         self.logger.info(f"[DUPLICATE-GUARD] {code} Bill Qty:{bill_qty} Successful:{successful_counts.get(code.upper(),0)} SKIP")
+                        self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "ALREADY_PRESENT", "portal_result": "BATCH_DUPLICATE_GUARD", "error": None, "retry_count": 0, "verification_result": "SUCCESS_COUNT_RECONCILED", "diagnostics": {}})
                         continue
                     item_ok = False
                     # ONLY ONE attempt per item now - no outer retry that can duplicate Plus (reconciliation inside orchestrator)
@@ -2118,6 +2153,11 @@ class BatchAutomationThread(QThread):
                         if item_ok:
                             successful_counts[code.upper()] = bill_qty
                             success_count += 1
+                            outcome = orchestrator.last_item_outcome or {"status": "EXECUTED", "verification": "PORTAL_ROW_VERIFIED"}
+                            self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": outcome.get("status", "EXECUTED"), "portal_result": outcome.get("status", "EXECUTED"), "error": None, "retry_count": 0, "verification_result": outcome.get("verification", "PORTAL_ROW_VERIFIED"), "diagnostics": {}, "metrics": outcome.get("metrics", {}), "checkpoints": ["ACTION_STARTED", "ACTION_VERIFIED"]})
+                        else:
+                            failed_items.append(code)
+                            self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "FAILED", "portal_result": None, "error": "Legacy executor returned false", "retry_count": 0, "verification_result": "PORTAL_STATE_NOT_VERIFIED", "diagnostics": {}})
                     except Exception as ex:
                         self.logger.warn(f"Attempt fail for [{code}]: {ex}")
                         artifacts = DiagnosticEngine.capture_artifact(driver, p_name, code, "Attempt", ex)
@@ -2126,18 +2166,21 @@ class BatchAutomationThread(QThread):
                             rows = driver.find_elements(By.XPATH, "//table[contains(@class,'table') or contains(@class,'mat-table')]//tbody//tr")
                             portal_count = 0
                             for r in rows:
-                                if code.upper() in (r.text or "").upper() or ("DRUG100"==code.upper() and "DRGU100" in (r.text or "").upper()):
-                                    portal_count += 1
-                            if portal_count >= bill_qty:
+                                code_text, qty_text = orchestrator.row_verifier._extract_row_text(r)
+                                if row_matches_exact_code(code_text, code):
+                                    portal_count += int(qty_text.strip()) if qty_text.strip().isdigit() else 1
+                            if portal_count == bill_qty:
                                 self.logger.info(f"[RECONCILE-OUTER] {code} portal {portal_count}/{bill_qty} treat success prevent duplicate")
                                 successful_counts[code.upper()] = bill_qty
                                 item_ok = True
                                 success_count += 1
+                                self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "EXECUTED", "portal_result": f"RECONCILED_PORTAL_ROWS:{portal_count}", "error": str(ex), "retry_count": 0, "verification_result": "RECONCILED_AFTER_EXCEPTION", "diagnostics": artifacts})
                         except Exception as re_e:
                             self.logger.warn(f"[RECONCILE-OUTER] fail {re_e}")
                         if not item_ok:
                             self.logger.error(f"Failed [{code}] after reconciliation")
                             failed_items.append(code)
+                            self.execution_results.append({"action_id": item.get("action_id"), "code": code, "requested_quantity": bill_qty, "action_status": "FAILED", "portal_result": None, "error": str(ex), "retry_count": 0, "verification_result": "PORTAL_STATE_NOT_VERIFIED", "diagnostics": artifacts})
                 if failed_items:
                     self.logger.error(f"[FINAL AUDIT] Failed {failed_items}")
                 else:
@@ -2146,9 +2189,28 @@ class BatchAutomationThread(QThread):
                     self.patient_status_signal.emit(p_idx, "COMPLETED" if not failed_items else "PARTIAL")
                     self.logger.info(f"Patient done: {p_name} ({success_count})")
             if not self._is_cancelled:
+                duration_ms = int((time.time() - batch_started) * 1000)
+                executable = [r for r in self.execution_results if r.get("action_status") not in ("BLOCKED", "REVIEW_REQUIRED")]
+                self.batch_metrics = {
+                    "action_count": len(self.execution_results),
+                    "successful_count": sum(r.get("action_status") == "EXECUTED" for r in self.execution_results),
+                    "already_present_count": sum(r.get("action_status") == "ALREADY_PRESENT" for r in self.execution_results),
+                    "failed_count": sum(r.get("action_status") not in ("EXECUTED", "ALREADY_PRESENT") for r in self.execution_results),
+                    "blocked_count": sum(r.get("action_status") == "BLOCKED" for r in self.execution_results),
+                    "review_required_count": sum(r.get("action_status") == "REVIEW_REQUIRED" for r in self.execution_results),
+                    "total_duration_ms": duration_ms,
+                    "average_executable_duration_ms": round(sum(r.get("metrics", {}).get("total_ms", 0) for r in executable) / len(executable), 2) if executable else 0,
+                }
+                self.execution_checkpoints.append({"event": "BATCH_COMPLETED", "timestamp": datetime.utcnow().isoformat() + "Z", "metrics": self.batch_metrics})
                 self.finished_signal.emit(True, "All Batches Processed")
         except Exception as fatal:
             msg = f"Fatal Batch Error: {fatal}"
+            self.fatal_error = msg
+            completed_ids = {r.get("action_id") for r in self.execution_results}
+            for patient in self.batch_queue:
+                for item in patient.get("items", []):
+                    if item.get("action_id") not in completed_ids:
+                        self.execution_results.append({"action_id": item.get("action_id"), "code": item.get("code"), "requested_quantity": item.get("qty", 1), "action_status": "FAILED", "portal_result": None, "error": msg, "retry_count": max(0, self.cdp_attempts - 1), "verification_result": "CDP_OR_PORTAL_UNAVAILABLE", "diagnostics": {}})
             self.logger.error(msg)
             self.logger.error(traceback.format_exc())
             DiagnosticEngine.capture_artifact(driver, "GLOBAL_FATAL", "FATAL", "FATAL_EXCEPTION", fatal)
