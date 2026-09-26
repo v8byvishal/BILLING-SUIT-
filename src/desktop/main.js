@@ -6,6 +6,7 @@ const { loadConfig } = require('../core/config');
 const { createLogger } = require('../core/logger');
 const { createAppState } = require('../core/app-state');
 const { ensureStorage, resolveStoragePath } = require('../core/storage');
+const { ingestBillPdf } = require('../services/bill-ingestion');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
@@ -28,6 +29,30 @@ function registerIpc() {
   ipcMain.handle('app:get-status', () => ({ ready: true, state: state.get(), version: app.getVersion() }));
   ipcMain.handle('storage:get-info', () => storageInfo);
   ipcMain.handle('config:get-public', () => publicConfig());
+  ipcMain.handle('bill:select-and-parse', async () => {
+    const selection = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select hospital bill PDF',
+      properties: ['openFile'],
+      filters: [{ name: 'PDF documents', extensions: ['pdf'] }]
+    });
+    if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
+    state.set('ANALYZING');
+    try {
+      const bill = await ingestBillPdf(selection.filePaths[0]);
+      state.set('BILL_LOADED');
+      logger.info('Bill PDF parsed', {
+        pages: bill.parsing_audit.pages_processed,
+        sections: bill.parsing_audit.sections_detected.length,
+        items: bill.parsing_audit.raw_items_detected,
+        excludedSections: bill.parsing_audit.excluded_patient_payable_sections.length
+      });
+      return { canceled: false, bill };
+    } catch (error) {
+      state.set('ERROR');
+      logger.error('Bill PDF parsing failed', error);
+      throw new Error(`Bill could not be parsed: ${error.message}`);
+    }
+  });
   ipcMain.handle('app:renderer-ready', () => {
     logger.info('Renderer ready', { state: state.get() });
     if (process.env.VNEXT_SMOKE_TEST === '1') setTimeout(() => app.quit(), 50);

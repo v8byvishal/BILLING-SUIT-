@@ -3,8 +3,8 @@
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Source audit and PRD | Complete; review PR opened |
-| 1 | Folder structure, Electron shell, external Storage, config, logs, state, tests, build foundation | Complete in current change; awaiting review |
-| 2 | Bill ingestion, parser, normalized bill model | Not started |
+| 1 | Folder structure, Electron shell, external Storage, config, logs, state, tests, build foundation | Complete |
+| 2 | Bill ingestion, parser, normalized bill model | Implemented; awaiting review and real-bill fixtures |
 | 3 | Authoritative CGHS rate list and deterministic rule engine | Not started |
 | 4 | Portal enhancement automation | Not started |
 | 5 | Enhancement verification workflow/UI | Not started |

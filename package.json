@@ -9,18 +9,20 @@
   "scripts": {
     "start": "electron .",
     "dev": "VNEXT_ENV=development electron .",
-    "test": "node --test tests/unit/*.test.js",
+    "test": "node --test tests/unit/*.test.js tests/integration/*.test.js",
     "test:desktop": "node scripts/smoke-test.js",
     "test:all": "npm test && npm run test:desktop",
     "build:dir": "electron-builder --dir",
     "build:win": "electron-builder --win portable"
   },
   "dependencies": {
+    "pdfjs-dist": "4.10.38",
     "sql.js": "1.13.0"
   },
   "devDependencies": {
     "electron": "31.7.7",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "pdf-lib": "1.17.1"
   },
   "build": {
     "appId": "in.cghsbilling.vnext",
@@ -33,10 +35,13 @@
       "src/**/*",
       "config/default.json",
       "package.json",
-      "node_modules/sql.js/**/*"
+      "node_modules/sql.js/**/*",
+      "node_modules/pdfjs-dist/**/*"
     ],
     "win": {
-      "target": ["portable"],
+      "target": [
+        "portable"
+      ],
       "artifactName": "CGHS-Billing-Suite-VNEXT-${version}-${arch}.${ext}"
     }
   }

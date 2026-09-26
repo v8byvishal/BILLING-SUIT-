@@ -10,11 +10,20 @@ h1 { margin:-2px 0 0; font-size:29px; letter-spacing:-.04em; }
 .dot.ready { background:var(--green); }
 .welcome { display:grid; grid-template-columns:1.5fr 1fr; gap:46px; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:42px; box-shadow:0 8px 30px rgba(29,45,58,.05); }
 .copy h2 { margin:12px 0; font-size:33px; line-height:1.15; letter-spacing:-.035em; }
-.copy > p:last-child { max-width:650px; color:var(--muted); font-size:15px; }
+.copy > p { max-width:650px; color:var(--muted); font-size:15px; }
+.primary-action { margin-top:14px; border:0; border-radius:8px; padding:11px 18px; background:var(--blue); color:#fff; font:600 14px "Segoe UI",Arial,sans-serif; cursor:pointer; }
+.primary-action:hover { background:#18496f; }
+.primary-action:disabled { opacity:.55; cursor:wait; }
 .readiness { margin:0; border-left:1px solid var(--line); padding-left:34px; }
 .readiness div { padding:12px 0; border-bottom:1px solid var(--line); }
 .readiness dt { color:var(--muted); font-size:12px; }
 .readiness dd { margin:3px 0 0; font-weight:650; }
+.parse-result { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:1px; overflow:hidden; border:1px solid var(--line); border-radius:10px; background:var(--line); }
+.parse-result[hidden] { display:none; }
+.parse-result div { padding:14px 16px; background:var(--surface); }
+.parse-result span { display:block; color:var(--muted); font-size:11px; }
+.parse-result strong { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.parse-result p { grid-column:1/-1; margin:0; padding:10px 16px; background:#fff; color:var(--muted); }
 .future h3 { margin:0; font-size:18px; }
 .future > p { margin:5px 0 16px; color:var(--muted); }
 .areas { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }

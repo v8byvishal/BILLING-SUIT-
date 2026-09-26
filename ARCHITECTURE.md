@@ -53,6 +53,20 @@ Initialization is guarded. Configuration, Storage, logger, and renderer failures
 
 `src/core/app-state.js` declares the PRD workflow vocabulary and initializes to `IDLE`. Phase 1 does not execute transitions or claim completed business work.
 
+## Phase 2 bill-ingestion boundary
+
+`src/services/bill-ingestion/` now owns local PDF loading and validation, page-aware text extraction, semantic section segmentation, metadata/item/Bed Details parsing, syntactic code normalization, exact-expression aggregation, Patient Payable exclusion, diagnostics, and Normalized Bill Model creation.
+
+```text
+Local PDF → pdf-loader → page-aware extracted document → bill-parser → BillDocument
+```
+
+Every page retains raw text and page number. Every extracted section/item retains page and raw source context. Patient Payable is represented as an excluded semantic context, including nested IP Pharmacy; exclusion is marker/context based rather than page based. Aggregation includes only primary items and groups only exact normalized expressions within the same semantic section. No rate validation or CGHS quantity/business calculation occurs.
+
+The Electron main process exposes one controlled `bill:select-and-parse` operation through preload. The renderer can select a PDF and display parsing status/counts; it receives no unrestricted filesystem API.
+
+`src/services/settlement/README.md` is the only new settlement artifact. Registration-ID reconciliation, IP-first/OP-fallback matching, Bill No/UHID enrichment, and settlement statuses remain a separate future service and are not imported into parsing.
+
 ## Future integration boundary
 
 Later approved phases may connect:
