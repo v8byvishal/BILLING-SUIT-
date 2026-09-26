@@ -21,6 +21,7 @@ const { InboxWatcher } = require('../services/cases/inbox-watcher');
 const { CaseWorkflowService } = require('../services/cases/case-workflow-service');
 const { summarizeValidation, validateBill } = require('../services/validation/bill-validator');
 const { classifyDiscrepancy, saveValidation } = require('../services/validation/validation-store');
+const { ProductionValidationRunService } = require('../services/validation/production-validation-run');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
 let mainWindow = null;
@@ -41,6 +42,8 @@ let inboxScanner = null;
 let inboxWatcher = null;
 let caseWorkflow = null;
 let currentValidationReport = null;
+let productionValidationService = null;
+let currentProductionValidationRun = null;
 const state = createAppState();
 
 function publicConfig() {
@@ -85,7 +88,11 @@ function registerIpc() {
   ipcMain.handle('storage:get-info', () => storageInfo);
   ipcMain.handle('config:get-public', () => publicConfig());
   ipcMain.handle('cases:list',()=>caseStore.list());
-  ipcMain.handle('validation:select-and-run',async()=>{if(!currentBill||!currentEnhancementPlan||!currentCaseId)throw new Error('Open a parsed case before validation');const selection=await dialog.showOpenDialog(mainWindow,{title:'Select reviewed expected-results JSON',properties:['openFile'],filters:[{name:'Expected validation baseline',extensions:['json']}]});if(selection.canceled||!selection.filePaths[0])return{canceled:true};const fixture=JSON.parse(fs.readFileSync(selection.filePaths[0],'utf8'));currentValidationReport=validateBill({fixture,caseId:currentCaseId,runId:`validation-${crypto.randomUUID()}`,bill:currentBill,plan:currentEnhancementPlan});saveValidation(caseStore,currentCaseId,currentValidationReport);logger.info('Case validation completed',{caseId:currentCaseId,fixtureId:fixture.fixture_id,status:currentValidationReport.status,discrepancies:currentValidationReport.summary.discrepancies});return{canceled:false,report:currentValidationReport,summary:summarizeValidation(currentValidationReport)};});
+  ipcMain.handle('validation:select-and-run',async()=>{if(!currentBill||!currentEnhancementPlan||!currentCaseId)throw new Error('Open a parsed case before validation');const selection=await dialog.showOpenDialog(mainWindow,{title:'Select reviewed expected-results JSON',properties:['openFile'],filters:[{name:'Expected validation baseline',extensions:['json']}]});if(selection.canceled||!selection.filePaths[0])return{canceled:true};const fixture=JSON.parse(fs.readFileSync(selection.filePaths[0],'utf8'));currentValidationReport=validateBill({fixture,caseId:currentCaseId,runId:`validation-${crypto.randomUUID()}`,bill:currentBill,plan:currentEnhancementPlan});saveValidation(caseStore,currentCaseId,currentValidationReport);const manifest=caseStore.load(currentCaseId);const sourceFile=manifest.initial_pdf_reference.archive_path;if(sourceFile){currentProductionValidationRun=productionValidationService.create({caseId:currentCaseId,sourceFile,sourceHash:manifest.initial_pdf_hash,parserVersion:currentBill.model_version||currentBill.parser_version||'UNKNOWN',plan:currentEnhancementPlan,registry:customCodeRegistry.snapshot()});currentProductionValidationRun=productionValidationService.recordPdfValidation(currentProductionValidationRun,currentValidationReport);}logger.info('Case validation completed',{caseId:currentCaseId,fixtureId:fixture.fixture_id,status:currentValidationReport.status,discrepancies:currentValidationReport.summary.discrepancies});return{canceled:false,report:currentValidationReport,summary:summarizeValidation(currentValidationReport)};});
+  ipcMain.handle('production-validation:get',()=>currentProductionValidationRun);
+  ipcMain.handle('production-validation:confirm-plan',(_event,input)=>{if(!currentProductionValidationRun)throw new Error('Run PDF validation first');currentProductionValidationRun=productionValidationService.confirmPlan(currentProductionValidationRun,input);return currentProductionValidationRun;});
+  ipcMain.handle('production-validation:add-note',(_event,input)=>{if(!currentProductionValidationRun)throw new Error('No production validation run');currentProductionValidationRun=productionValidationService.addNote(currentProductionValidationRun,input);return currentProductionValidationRun;});
+  ipcMain.handle('production-validation:preflight',(_event,input)=>{if(!currentProductionValidationRun)throw new Error('No production validation run');const request=adaptEnhancementPlan(currentEnhancementPlan,{registrySnapshot:customCodeRegistry.snapshot()});const held=caseLock.read();return productionValidationService.preflight(currentProductionValidationRun,{...input,activeCaseId:currentCaseId,lockAvailable:!held||held.case_id===currentCaseId,executableCount:request.actions.length,unsafeActionCount:0});});
   ipcMain.handle('validation:classify',(_event,id,decision)=>{if(!currentValidationReport)throw new Error('No validation report is active');currentValidationReport=classifyDiscrepancy(currentValidationReport,id,decision);saveValidation(caseStore,currentCaseId,currentValidationReport);return currentValidationReport;});
   ipcMain.handle('cases:open',(_event,id)=>{const manifest=caseWorkflow.openCase(id);currentCaseId=id;const initialPath=path.join(caseStore.directory(id),'normalized','initial-bill.json');const planPath=path.join(caseStore.directory(id),'enhancement','plan.json');currentBill=fs.existsSync(initialPath)?JSON.parse(fs.readFileSync(initialPath)):null;currentEnhancementPlan=fs.existsSync(planPath)?JSON.parse(fs.readFileSync(planPath)):null;currentValidationReport=null;return{manifest,bill:currentBill,enhancementPlan:currentEnhancementPlan};});
   ipcMain.handle('inbox:scan',async(_event,kind='initial')=>{const files=inboxScanner.scan(kind);const outcomes=[];for(const file of files.filter(x=>x.status==='STABLE'))outcomes.push(await processInboxCandidate(kind,file));return{files,outcomes,cases:caseStore.list()};});
@@ -142,7 +149,9 @@ function registerIpc() {
     if (!currentEnhancementPlan) throw new Error('Parse a bill before preparing portal actions');
     return adaptEnhancementPlan(currentEnhancementPlan, { registrySnapshot: customCodeRegistry.snapshot() });
   });
-  ipcMain.handle('portal:execute', async () => {
+  ipcMain.handle('portal:execute', async (_event, confirmation) => {
+    if (confirmation?.confirmed !== true) throw new Error('EXPLICIT_LIVE_PORTAL_CONFIRMATION_REQUIRED');
+    if (!currentProductionValidationRun || currentProductionValidationRun.overall_status !== 'READY_FOR_PORTAL') throw new Error('Production validation plan review is not complete');
     if (!currentEnhancementPlan || !currentCaseId) throw new Error('Open a persisted case before portal execution');
     const manifest = caseStore.load(currentCaseId);
     if (manifest.workflow_status === 'PLAN_READY') caseWorkflow.markReadyForPortal(currentCaseId);
@@ -150,13 +159,13 @@ function registerIpc() {
     logger.info('Case portal execution started; authenticated Chrome CDP session is required', { caseId: currentCaseId });
     try {
       const audit = await executeEnhancementPlan(currentEnhancementPlan, new LegacyPythonRunner(), { registrySnapshot: customCodeRegistry.snapshot() });
-      currentExecutionAudit = audit; caseWorkflow.recordPortalResult(currentCaseId, audit);
+      currentExecutionAudit = audit; caseWorkflow.recordPortalResult(currentCaseId, audit);currentProductionValidationRun=productionValidationService.recordPortal(currentProductionValidationRun,audit);
       logger.info('Case portal execution finished', { caseId: currentCaseId, runId: audit.run_id, status: audit.status, counts: audit.counts });
       return audit;
     } catch (error) { caseWorkflow.failPortal(currentCaseId, error); throw error; }
   });
   ipcMain.handle('case:confirm-verification', (_event, operator) => caseWorkflow.confirmVerification(currentCaseId, operator));
-  ipcMain.handle('case:confirm-discharge', (_event, operator) => caseWorkflow.confirmDischarge(currentCaseId, operator));
+  ipcMain.handle('case:confirm-discharge', (_event, operator) => {const result=caseWorkflow.confirmDischarge(currentCaseId, operator);if(currentProductionValidationRun)currentProductionValidationRun=productionValidationService.confirmManualDischarge(currentProductionValidationRun,{operator,confirmed:true});return result;});
   ipcMain.handle('final-bill:select-and-parse', async () => {
     if (!currentBill || !currentEnhancementPlan) throw new Error('Load and analyze the initial bill before loading a final bill');
     const selection = await dialog.showOpenDialog(mainWindow, { title: 'Select final bill PDF after manual discharge', properties: ['openFile'], filters: [{ name: 'PDF documents', extensions: ['pdf'] }] });
@@ -164,7 +173,7 @@ function registerIpc() {
     try {
       const filePath=selection.filePaths[0]; const file={file_path:filePath,file_name:path.basename(filePath),sha256:crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')};
       const result=await caseWorkflow.attachFinal(currentCaseId,file,currentEnhancementPlan,currentExecutionAudit);
-      currentFinalBillPath=filePath;currentCompletedBill=result.completedBill||null;
+      currentFinalBillPath=filePath;currentCompletedBill=result.completedBill||null;if(currentProductionValidationRun&&currentCompletedBill)currentProductionValidationRun=productionValidationService.linkFinalBill(currentProductionValidationRun,{caseId:currentCaseId,result:currentCompletedBill});
       if(!currentCompletedBill)return{canceled:false,outcome:result.outcome,case:result.case};
       logger.info('Case final bill parsed locally',{caseId:currentCaseId,runId:currentCompletedBill.run_id,status:currentCompletedBill.status});
       return{canceled:false,outcome:result.outcome,case:result.case,completedBill:currentCompletedBill};
@@ -178,7 +187,7 @@ function registerIpc() {
   ipcMain.handle('final-bill:save', (_event, options = {}) => {
     if (!currentCompletedBill) throw new Error('Load a final bill before saving');
     const result=caseWorkflow.saveCompleted(currentCaseId,currentCompletedBill,{finalPdfPath:currentFinalBillPath,allowReprocess:options.allowReprocess===true});
-    logger.info('Case completed bill storage result',{caseId:currentCaseId,runId:currentCompletedBill.run_id,status:result.status,reason:result.reason||null});return result;
+    if(currentProductionValidationRun)currentProductionValidationRun=productionValidationService.linkCompleted(currentProductionValidationRun,{caseId:currentCaseId,reference:{package_path:result.package_path||null,run_id:currentCompletedBill.run_id},status:result.status});logger.info('Case completed bill storage result',{caseId:currentCaseId,runId:currentCompletedBill.run_id,status:result.status,reason:result.reason||null});return result;
   });
   ipcMain.handle('app:renderer-ready', () => {
     logger.info('Renderer ready', { state: state.get() });
@@ -230,7 +239,7 @@ async function bootstrap() {
     customCodeRegistry = new CustomCodeRegistry(storagePath);
     rebuildRateRepository();
     caseStore=new CaseStore(storagePath);caseLock=new ActiveCaseLock(storagePath);inboxScanner=new InboxScanner(storagePath,{minAgeMs:Math.max(config.automaticInboxWatch.stabilityWindowMs,config.automaticInboxWatch.minimumFileAgeMs)});
-    caseWorkflow=new CaseWorkflowService({store:caseStore,lock:caseLock,rateRepository,registrySnapshot:()=>customCodeRegistry.snapshot(),storageRoot:storagePath});
+    caseWorkflow=new CaseWorkflowService({store:caseStore,lock:caseLock,rateRepository,registrySnapshot:()=>customCodeRegistry.snapshot(),storageRoot:storagePath});productionValidationService=new ProductionValidationRunService({caseStore});
     const watcherAuditFile=path.join(storagePath,'Logs','inbox-watcher.jsonl');
     inboxWatcher=new InboxWatcher({scanner:inboxScanner,processCandidate:processInboxCandidate,intervalMs:config.automaticInboxWatch.pollingIntervalMs,maxQueue:config.automaticInboxWatch.maximumQueueSize,concurrency:config.automaticInboxWatch.backgroundConcurrency,audit:event=>fs.appendFileSync(watcherAuditFile,`${JSON.stringify(event)}\n`,{mode:0o600})});
     if(config.automaticInboxWatch.enabled)inboxWatcher.start();

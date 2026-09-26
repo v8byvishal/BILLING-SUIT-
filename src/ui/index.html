@@ -54,7 +54,7 @@
 
     <section class="plan-view" id="validationView" hidden aria-labelledby="validationTitle">
       <div class="plan-head"><div><h3 id="validationTitle">Bill validation</h3><p>Compare the current one-pass bill/plan artifacts with a reviewed, versioned expected baseline.</p></div><span id="validationStatus">NOT RUN</span></div>
-      <div class="final-actions"><button id="runValidation" type="button">Select expected JSON and validate</button><span id="validationSummary">No validation report loaded.</span></div>
+      <div class="final-actions"><button id="runValidation" type="button">Select expected JSON and validate</button><button id="confirmValidationPlan" type="button">Confirm reviewed plan</button><button id="addValidationNote" type="button">Add operator note</button><span id="validationSummary">No validation report loaded.</span></div>
       <div class="table-wrap"><table><thead><tr><th>Type</th><th>Code</th><th>Expected</th><th>Actual</th><th>Section/Page</th><th>Reason</th><th>Decision</th></tr></thead><tbody id="validationRows"></tbody></table></div>
       <pre id="validationEvidence" hidden></pre>
     </section>

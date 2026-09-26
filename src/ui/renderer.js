@@ -97,6 +97,8 @@ function renderValidation(report, summary) {
   for(const finding of report.discrepancies){const row=document.createElement('tr');for(const value of [finding.type,finding.code,displayNumber(finding.expected_quantity),displayNumber(finding.actual_quantity),`${finding.evidence?.section||finding.section||'—'} / ${finding.evidence?.page||'—'}`,finding.reason]){const cell=document.createElement('td');cell.textContent=value||'—';row.appendChild(cell);}const action=document.createElement('td');action.append(button('Evidence',()=>{const out=document.getElementById('validationEvidence');out.textContent=JSON.stringify(finding,null,2);out.hidden=false;}));action.append(button('Classify',async()=>{const classification=window.prompt('Classification: CONFIRMED, FALSE_POSITIVE, EXPECTED_VARIATION, or NEEDS_REVIEW','NEEDS_REVIEW');if(!['CONFIRMED','FALSE_POSITIVE','EXPECTED_VARIATION','NEEDS_REVIEW'].includes(classification))return;const operator=window.prompt('Operator identifier'),reason=window.prompt('Reason');if(!operator||!reason)return;const updated=await window.vnext.classifyValidationFinding(finding.discrepancy_id,{classification,operator,reason});renderValidation(updated);await loadReviewQueue();}));row.appendChild(action);body.appendChild(row);}
 }
 async function runValidation(){try{const result=await window.vnext.runBillValidation();if(!result.canceled){renderValidation(result.report,result.summary);await loadReviewQueue();}}catch(error){text('validationStatus','FAILED');text('validationSummary',error.message);}}
+async function confirmValidationPlan(){const operator=window.prompt('Operator identifier');if(!operator||!window.confirm('Confirm this exact reviewed EnhancementPlan for optional live execution?'))return;const run=await window.vnext.confirmProductionPlan({operator,confirmed:true});text('validationSummary',`Validation run ${run.validation_run_id}: READY FOR PORTAL`);}
+async function addValidationNote(){const operator=window.prompt('Operator identifier'),note=window.prompt('Validation note');if(operator&&note)await window.vnext.addProductionValidationNote({operator,note});}
 
 async function loadReviewQueue() {
   currentReviewQueue = await window.vnext.listReviewQueue();
@@ -216,11 +218,13 @@ async function preparePortal() {
 
 async function executePortal() {
   if (!portalPreview || !window.confirm(`Execute ${portalPreview.actions.length} verified action(s) in the live portal?`)) return;
+  const authenticated=window.confirm('Confirm you authenticated manually and opened the correct CGHS case/page.');if(!authenticated)return;
+  const preflight=await window.vnext.productionPortalPreflight({planStale:false,lockAvailable:true,cdpAvailable:true,authenticated:true,portalContext:true,unsafeActionCount:portalPreview.blocked.length});if(!preflight.ready){text('portalStatus','PREFLIGHT FAILED');text('portalSummary',JSON.stringify(preflight.checks));return;}
   const button = document.getElementById('executePortal');
   button.disabled = true;
   text('portalStatus', 'EXECUTING');
   try {
-    const audit = await window.vnext.executePortalActions();
+    const audit = await window.vnext.executePortalActions({confirmed:true});
     text('portalStatus', audit.status);
     text('portalSummary', `Verified results: ${audit.counts.EXECUTED} executed, ${audit.counts.ALREADY_PRESENT} already present, ${audit.counts.FAILED} failed, ${audit.counts.UNKNOWN} unknown, ${audit.counts.BLOCKED} blocked.`);
     const cases=await loadCases();const active=cases.find(item=>item.case_id===currentCase?.case_id);if(active)updateCaseActions(active);
@@ -263,6 +267,8 @@ async function initialize() {
     document.getElementById('confirmVerification').addEventListener('click',()=>confirmCaseStep('verification'));
     document.getElementById('confirmDischarge').addEventListener('click',()=>confirmCaseStep('discharge'));
     document.getElementById('runValidation').addEventListener('click',runValidation);
+    document.getElementById('confirmValidationPlan').addEventListener('click',confirmValidationPlan);
+    document.getElementById('addValidationNote').addEventListener('click',addValidationNote);
     await loadRegistry();
     await loadCases();
     await refreshWatcher();
