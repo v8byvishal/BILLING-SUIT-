@@ -10,43 +10,36 @@ This file records the current V2 phase status for this repository checkout. Sour
 | 1 | Desktop Foundation, Application Shell & Safe Architecture | Complete | Vanilla Electron shell, controlled preload/IPC, initial external Storage foundation, app-state store, `billSessionId` isolation, settings, diagnostics, and Phase 1 tests. Desktop runtime launch remained environment-blocked. |
 | 2 | External Storage, Persistent Runtime Data & Recovery Foundation | Complete | Authoritative `StorageService`, manifest, source/final/session/audit/failure/config persistence, SHA-256 integrity, duplicate detection, atomic JSON, corruption handling, temp recovery, storage diagnostics, UI storage views, and Phase 2 tests. |
 | 3 | Source Bill PDF Ingestion, Evidence Extraction & Historical Parser Regression | Complete | Stored-source parser pipeline, page model, conservative normalization, section detection, evidence candidates, parser result persistence, Source Bills UI, synthetic Description `(CODE)` regression coverage. Real hospital-bill fixture unavailable. |
-| 4 | Authoritative CGHS Registry & Deterministic Rule Resolution | Implemented in this branch | Versioned registry architecture, active registry storage, registry validator, deterministic resolver, explicit locked rules, conflict detection, raw alias protection, resolution persistence, UI preview, and 47 Phase 4 tests. Official CGHS master/rate source unavailable, so registry authority is partial/unverified. |
-| 5 | Deterministic EnhancementPlan Generation & Validation | Next | Must consume `ResolutionResult` and create a reviewed plan without portal execution. |
-| 6 | Final bill composition/output | Not started | Phase 4 does not generate final PDFs. |
+| 4 | Authoritative CGHS Registry & Deterministic Rule Resolution | Complete | Versioned registry architecture, active registry storage, registry validator, deterministic resolver, explicit locked rules, conflict detection, raw alias protection, resolution persistence, UI preview, and 47 Phase 4 tests. Official CGHS master/rate source unavailable, so registry authority is partial/unverified. |
+| 5 | Deterministic EnhancementPlan Generation & Validation | Implemented in this branch | Deterministic plan builder/validator, action/review/exclusion gating, quantity validation, protected-alias enforcement, plan hash/id, Storage persistence, controlled IPC, UI plan tables, 50-case matrix, and golden fixtures. Portal execution/final PDF remain not implemented. |
+| 6 | Final bill composition/output | Not started | Phase 5 does not generate final PDFs. |
 | 7 | Portal readiness/live automation validation | Not started / not verified | Existing portal executor is preserved; authenticated live portal validation is not claimed. |
 
-## Phase 4 acceptance scope
+## Phase 5 acceptance scope
 
-Phase 4 acceptance is limited to registry/rule resolution:
+Phase 5 acceptance is limited to safe deterministic `EnhancementPlan` construction and validation:
 
-- registry source audit;
-- source hierarchy and authority statuses;
-- versioned registry schema;
-- source hash recording;
-- registry validation;
-- duplicate/conflict/date/source-reference checks;
-- active registry persistence under external Storage;
-- deterministic lookup and resolution;
-- explicit locked mapping rules;
-- C002 oxygen and packed-cell separation;
-- C003 review-required handling;
-- derived ICU/Ward/CN002 rules;
-- explicit category composition rules;
-- raw alias protection;
-- resolution provenance and persistence;
-- UI registry status and resolution preview;
-- parser-to-resolver regression for `Description (C008)`.
+- consume Phase 3 `ParserResult` and Phase 4 `ResolutionResult`;
+- produce schema-versioned plan artifacts;
+- persist plan and summary under the source-bill enhancement folder;
+- gate executable action rows through validated evidence, authority, quantity, context, registry/rule version, and conflict checks;
+- preserve uncertain rows as review-required;
+- preserve Patient Payable/non-domain/unsupported/rejected/duplicate rows as excluded evidence;
+- validate quantities without defaulting missing/invalid values;
+- enforce protected raw alias handling and no blanket `C -> CC` mapping;
+- independently validate schema, context, provenance, source-candidate membership, aggregation, stale state, hash integrity, and security boundaries;
+- expose controlled IPC and UI plan views.
 
-## Explicit non-goals for Phase 4
+## Explicit non-goals for Phase 5
 
-- Do not rewrite the parser.
-- Do not alter portal automation.
-- Do not create final bill PDFs.
-- Do not invent CGHS codes or rates.
-- Do not treat the bundled HFOS snapshot as official authority.
+- Do not invoke portal automation.
+- Do not invoke Selenium, Chrome, CDP, `portal_bridge`, or Python portal executor.
+- Do not store or request credentials/cookies/tokens.
+- Do not perform automatic discharge.
+- Do not compose or generate final bill PDFs.
+- Do not invent CGHS codes, rates, authority, quantities, parser output, final PDFs, or portal readiness.
 - Do not map raw aliases by blanket prefix logic.
-- Do not let parser success imply validated mapping success.
-- Do not call Selenium, CDP, Python portal executor, external APIs, or credential flows.
+- Do not treat parser success or resolver success alone as portal readiness.
 
 ## Validation categories
 

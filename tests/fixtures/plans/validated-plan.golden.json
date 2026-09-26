@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "planVersion": "5.0.0",
+  "planId": "plan-b589092cd3bd2083",
+  "billSessionId": "bill-session-phase5",
+  "sourceBillId": "bill-session-phase5",
+  "createdAt": "2026-09-27T00:00:00.000Z",
+  "registryContext": {
+    "registryVersion": "phase5-test-registry",
+    "registrySourceHash": "phase5-test-registry-hash",
+    "authorityStatus": "TEST_ONLY",
+    "status": "READY",
+    "source": {
+      "type": "TEST_ONLY_JSON",
+      "file": "phase5-registry.json"
+    }
+  },
+  "ruleContext": {
+    "ruleSetVersion": "4.0.0",
+    "validatedRules": 16
+  },
+  "createdAgainst": {
+    "parserVersion": "3.0.0",
+    "registryVersion": "phase5-test-registry",
+    "registrySourceHash": "phase5-test-registry-hash",
+    "ruleSetVersion": "4.0.0"
+  },
+  "status": "VALIDATED",
+  "readiness": "READY_FOR_PORTAL_VALIDATION",
+  "actions": [
+    {
+      "actionId": "action-0001",
+      "actionType": "CGHS_ENHANCEMENT_LINE",
+      "candidateId": "candidate-0001",
+      "billSessionId": "bill-session-phase5",
+      "finalCode": "CC008",
+      "description": "Blood Transfusion Charge",
+      "quantity": {
+        "value": 1,
+        "unit": null,
+        "precision": 3
+      },
+      "authority": {
+        "type": "VALIDATED_RULE",
+        "status": "PROJECT_APPROVED",
+        "ruleId": "CGHS_C_008_BLOOD_TRANSFUSION",
+        "registryEntryId": null
+      },
+      "provenance": {
+        "sourceCandidateIds": [
+          "candidate-0001"
+        ],
+        "ruleId": "CGHS_C_008_BLOOD_TRANSFUSION",
+        "registryEntryId": null,
+        "resolutionRunId": "resolution-run-phase5",
+        "parserRunId": "parser-run-phase5"
+      },
+      "sourceEvidence": {
+        "pageNumber": 1,
+        "section": "PROCEDURES",
+        "text": "Blood Transfusion Charge (C008) Qty 1",
+        "lineNumbers": [
+          1
+        ]
+      },
+      "input": {
+        "rawCode": "C008",
+        "description": "Blood Transfusion Charge",
+        "quantityRaw": "1"
+      },
+      "resolved": {
+        "finalCode": "CC008",
+        "quantity": 1,
+        "unit": null
+      },
+      "resolution": {
+        "status": "VALIDATED_MAPPING",
+        "ruleId": "CGHS_C_008_BLOOD_TRANSFUSION",
+        "registryEntryId": null,
+        "authorityStatus": "PROJECT_APPROVED",
+        "ruleSetVersion": "4.0.0",
+        "registryVersion": "phase5-test-registry",
+        "registrySourceHash": "phase5-test-registry-hash",
+        "ruleStatus": "VALIDATED"
+      },
+      "aggregation": {
+        "groupKey": "CC008|NO_UNIT|CGHS_C_008_BLOOD_TRANSFUSION|BLOOD TRANSFUSION CHARGE",
+        "sourceCandidateIds": [
+          "candidate-0001"
+        ],
+        "aggregationMethod": "SINGLE_CANDIDATE",
+        "sourceQuantities": [
+          {
+            "candidateId": "candidate-0001",
+            "quantity": 1
+          }
+        ]
+      },
+      "derivation": null,
+      "state": "VALIDATED_ACTION"
+    }
+  ],
+  "reviewItems": [],
+  "excludedItems": [],
+  "diagnostics": {
+    "candidateCount": 1,
+    "validatedCount": 1,
+    "reviewCount": 0,
+    "excludedCount": 0,
+    "conflictCount": 0,
+    "actionCount": 1,
+    "duplicateCount": 0,
+    "sourceCandidateIds": [
+      "candidate-0001"
+    ],
+    "blockingReasons": [],
+    "registryStatus": "READY",
+    "registryAuthorityStatus": "TEST_ONLY"
+  },
+  "planSha256": "b589092cd3bd2083d320c26acb9ce25b234d96d285c77a1a4e53f46f8f314737",
+  "validation": {
+    "status": "PASS",
+    "issueCount": 0,
+    "issues": []
+  }
+}

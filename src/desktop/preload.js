@@ -49,7 +49,11 @@ const api = Object.freeze({
     reset: () => call(OPERATIONS.BILL_RESET)
   }),
   enhancement: Object.freeze({
-    getPlan: () => call(OPERATIONS.ENHANCEMENT_GET_PLAN),
+    buildPlan: (billSessionId) => call(OPERATIONS.ENHANCEMENT_BUILD_PLAN, { billSessionId }),
+    getPlan: (billSessionId) => call(OPERATIONS.ENHANCEMENT_GET_PLAN, { billSessionId }),
+    getPlanSummary: (billSessionId) => call(OPERATIONS.ENHANCEMENT_GET_PLAN_SUMMARY, { billSessionId }),
+    validatePlan: (billSessionId) => call(OPERATIONS.ENHANCEMENT_VALIDATE_PLAN, { billSessionId }),
+    rebuildPlan: (billSessionId) => call(OPERATIONS.ENHANCEMENT_REBUILD_PLAN, { billSessionId }),
     getStatus: () => call(OPERATIONS.ENHANCEMENT_GET_STATUS)
   }),
   finalBill: Object.freeze({

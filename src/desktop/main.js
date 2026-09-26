@@ -30,6 +30,8 @@ const { createDiagnosticsReport, ensureDiagnosticsFolder, writeDiagnosticsReport
 const { parseStoredSourceBill, PARSER_STATUSES } = require('../services/bill-ingestion/source-parser');
 const { ActiveRegistryStore } = require('../services/cghs/registry');
 const { getDefaultRuleSet, resolveParseResult } = require('../services/cghs/rule-resolution');
+const { EnhancementPlanBuilder, createPlanSummary } = require('../services/cghs/plan-builder');
+const { EnhancementPlanValidator } = require('../services/cghs/plan-validator');
 const { OPERATIONS, registerPhase1Ipc } = require('./phase1-ipc');
 
 const APP_DIR = path.resolve(__dirname, '..', '..');
@@ -58,6 +60,7 @@ let registryStore = null;
 let activeRegistryState = null;
 let activeRuleSet = null;
 let currentResolutionRun = null;
+let currentDeterministicPlan = null;
 let settingsStore = null;
 let phase1Settings = null;
 const state = createAppState();
@@ -116,6 +119,61 @@ function persistResolutionForParseResult(parseResult) {
   return resolution;
 }
 
+function registryContextForPlan() {
+  const summary = registryStatusSummary() || {};
+  return {
+    status: summary.status || null,
+    registryVersion: summary.registryVersion || activeRegistry()?.registryVersion || 'NONE',
+    registrySourceHash: summary.registryHash || activeRegistry()?.sourceHash || 'NONE',
+    authorityStatus: summary.authorityStatus || activeRegistry()?.authorityStatus || 'UNVERIFIED',
+    source: summary.registrySource || activeRegistry()?.source || null
+  };
+}
+
+function buildAndPersistEnhancementPlan({ parserResult, resolutionResult, sourceBillId }) {
+  if (!parserResult || !storageService) return null;
+  const billSessionId = parserResult.billSessionId;
+  const planRunId = `plan-build-${crypto.randomUUID()}`;
+  storageService.appendAudit({ runId: planRunId, billSessionId, operation: 'PLAN_BUILD_STARTED', stage: 'ENHANCEMENT_PLAN', status: 'BUILDING', sourceRef: { parserRunId: parserResult.runId || null, resolutionRunId: resolutionResult?.runId || null } });
+  try {
+    const builder = new EnhancementPlanBuilder({ ruleSetContext: activeRuleSet });
+    const plan = builder.build({
+      billSessionId,
+      sourceBillId,
+      parserResult,
+      resolutionResult,
+      registryContext: registryContextForPlan(),
+      ruleSetContext: activeRuleSet
+    });
+    storageService.appendAudit({ runId: planRunId, billSessionId, operation: 'PLAN_VALIDATION_STARTED', stage: 'ENHANCEMENT_PLAN', status: 'VALIDATING', sourceRef: { planId: plan.planId } });
+    const sourceRecord = storageService.getSourceBillRecord(billSessionId, { verifyHash: false });
+    const validation = new EnhancementPlanValidator({ ruleSetContext: activeRuleSet }).validate(plan, {
+      billSessionId,
+      sourceBillId,
+      parserVersion: parserResult.parserVersion,
+      registryVersion: activeRegistry()?.registryVersion || plan.createdAgainst.registryVersion,
+      registrySourceHash: activeRegistry()?.sourceHash || plan.createdAgainst.registrySourceHash,
+      ruleSetVersion: activeRuleSet.ruleSetVersion,
+      sourceCandidateIds: (parserResult.candidates || []).map((candidate) => candidate.candidateId).filter(Boolean),
+      sourceExists: sourceRecord.status === 'SUCCESS'
+    });
+    plan.validation = { status: validation.status, issueCount: validation.issues.length, issues: validation.issues };
+    const summary = createPlanSummary(plan);
+    storageService.writeEnhancementPlan(billSessionId, plan, summary);
+    currentDeterministicPlan = plan;
+    phase1State.setEnhancement({ billSessionId, status: plan.status, plan: summary, diagnostics: plan.validation?.issues || [] });
+    storageService.updateBillSession(billSessionId, { status: plan.status, enhancementPlanPath: storageService.getEnhancementPlanPath(billSessionId) });
+    storageService.appendAudit({ runId: planRunId, billSessionId, operation: validation.valid ? 'PLAN_VALIDATION_PASSED' : 'PLAN_VALIDATION_FAILED', stage: 'ENHANCEMENT_PLAN', status: validation.status, sourceRef: { planId: plan.planId, issueCount: validation.issues.length } });
+    storageService.appendAudit({ runId: planRunId, billSessionId, operation: 'PLAN_BUILD_COMPLETED', stage: 'ENHANCEMENT_PLAN', status: plan.status, sourceRef: { planId: plan.planId, planSha256: plan.planSha256, summary } });
+    if (plan.reviewItems.length) storageService.appendAudit({ runId: planRunId, billSessionId, operation: 'PLAN_MARKED_REVIEW_REQUIRED', stage: 'ENHANCEMENT_PLAN', status: plan.status, sourceRef: { planId: plan.planId, reviewCount: plan.reviewItems.length } });
+    if (plan.readiness === 'READY_FOR_PORTAL_VALIDATION') storageService.appendAudit({ runId: planRunId, billSessionId, operation: 'PLAN_MARKED_READY_FOR_PORTAL_VALIDATION', stage: 'ENHANCEMENT_PLAN', status: plan.readiness, sourceRef: { planId: plan.planId, actionCount: plan.actions.length } });
+    return plan;
+  } catch (error) {
+    storageService.appendAudit({ runId: planRunId, billSessionId, operation: 'PLAN_BUILD_FAILED', stage: 'ENHANCEMENT_PLAN', status: 'FAILED', errorCode: error.code || 'PLAN_BUILD_FAILED', sourceRef: { message: error.message } });
+    throw error;
+  }
+}
+
 function refreshCurrentPlan() {
   rebuildRateRepository();
   if (currentBill) {
@@ -146,6 +204,7 @@ function clearActiveBillWorkspace() {
   currentValidationReport = null;
   currentProductionValidationRun = null;
   currentResolutionRun = null;
+  currentDeterministicPlan = null;
   currentCaseId = null;
   state.set('IDLE');
   phase1State.resetCurrentBill();
@@ -175,6 +234,43 @@ function enhancementStatusForPlan(plan) {
   return ENHANCEMENT_STATUS.NOT_STARTED;
 }
 
+function buildPlanForBillSession(billSessionId) {
+  if (!billSessionId) throw new Error('billSessionId is required');
+  const sourceRecord = storageService.getSourceBillRecord(billSessionId, { verifyHash: false });
+  const parse = storageService.readParseResult(billSessionId);
+  let resolution = storageService.readResolutionResult(billSessionId);
+  if (parse.status === 'SUCCESS' && resolution.status !== 'SUCCESS') {
+    persistResolutionForParseResult(parse.result);
+    resolution = storageService.readResolutionResult(billSessionId);
+  }
+  const plan = buildAndPersistEnhancementPlan({
+    parserResult: parse.status === 'SUCCESS' ? parse.result : { billSessionId, parserVersion: null, candidates: [], candidateCount: 0 },
+    resolutionResult: resolution.status === 'SUCCESS' ? resolution.result : null,
+    sourceBillId: sourceRecord.metadata?.sourceBillId || billSessionId
+  });
+  return plan;
+}
+
+function validateStoredPlan(billSessionId) {
+  if (!billSessionId) return { status: 'NOT_FOUND', error: 'billSessionId is required', billSessionId: null };
+  const loaded = storageService.readEnhancementPlan(billSessionId);
+  if (loaded.status !== 'SUCCESS') return { status: loaded.status, error: loaded.error || null, billSessionId };
+  const parse = storageService.readParseResult(billSessionId);
+  const validator = new EnhancementPlanValidator({ ruleSetContext: activeRuleSet });
+  const result = validator.validate(loaded.plan, {
+    billSessionId,
+    sourceBillId: loaded.plan.sourceBillId,
+    parserVersion: parse.result?.parserVersion || loaded.plan.createdAgainst?.parserVersion || null,
+    registryVersion: activeRegistry()?.registryVersion || loaded.plan.createdAgainst?.registryVersion || null,
+    registrySourceHash: activeRegistry()?.sourceHash || loaded.plan.createdAgainst?.registrySourceHash || null,
+    ruleSetVersion: activeRuleSet?.ruleSetVersion || null,
+    sourceCandidateIds: (parse.result?.candidates || []).map((candidate) => candidate.candidateId).filter(Boolean),
+    sourceExists: storageService.getSourceBillRecord(billSessionId, { verifyHash: false }).status === 'SUCCESS'
+  });
+  if (result.stale?.stale) storageService.appendAudit({ billSessionId, operation: 'PLAN_MARKED_STALE', stage: 'ENHANCEMENT_PLAN', status: 'STALE', sourceRef: { planId: loaded.plan.planId, reasons: result.stale.reasons } });
+  return { billSessionId, planId: loaded.plan.planId, validation: result };
+}
+
 async function selectAndParseSourceBill() {
   const selection = await dialog.showOpenDialog(mainWindow, {
     title: 'Select hospital bill PDF',
@@ -195,6 +291,12 @@ async function selectAndParseSourceBill() {
         existingResolution = storageService.readResolutionResult(importResult.billSessionId);
       }
       currentResolutionRun = existingResolution.status === 'SUCCESS' ? existingResolution.result : null;
+      let existingPlan = storageService.readEnhancementPlan(importResult.billSessionId);
+      if (existingParse.status === 'SUCCESS' && currentResolutionRun && existingPlan.status !== 'SUCCESS') {
+        buildAndPersistEnhancementPlan({ parserResult: existingParse.result, resolutionResult: currentResolutionRun, sourceBillId: importResult.metadata?.sourceBillId || importResult.billSessionId });
+        existingPlan = storageService.readEnhancementPlan(importResult.billSessionId);
+      }
+      currentDeterministicPlan = existingPlan.status === 'SUCCESS' ? existingPlan.plan : null;
       const source = { file_path: importResult.paths?.sourceFile || null, file_name: importResult.metadata?.originalFileName || path.basename(filePath), sha256: importResult.metadata?.sha256 || null, source_bill_id: importResult.metadata?.sourceBillId || importResult.billSessionId };
       const billSessionId = phase1State.startBillSession({
         billSessionId: importResult.billSessionId,
@@ -208,13 +310,17 @@ async function selectAndParseSourceBill() {
           candidateCount: existingParse.result?.candidateCount || 0,
           resolutionStatus: currentResolutionRun?.status || 'NOT_STARTED',
           resolutionCount: currentResolutionRun?.resultCount || 0,
-          ruleSetVersion: currentResolutionRun?.ruleSetVersion || activeRuleSet?.ruleSetVersion || null
+          ruleSetVersion: currentResolutionRun?.ruleSetVersion || activeRuleSet?.ruleSetVersion || null,
+          planStatus: currentDeterministicPlan?.status || 'NOT_CREATED',
+          planId: currentDeterministicPlan?.planId || null,
+          planSha256: currentDeterministicPlan?.planSha256 || null
         }
       });
-      currentBill = existingParse.status === 'SUCCESS' ? { source, parserResult: existingParse.result, resolutionResult: currentResolutionRun } : { source, parserResult: null, resolutionResult: null };
+      currentBill = existingParse.status === 'SUCCESS' ? { source, parserResult: existingParse.result, resolutionResult: currentResolutionRun, enhancementPlan: currentDeterministicPlan } : { source, parserResult: null, resolutionResult: null, enhancementPlan: null };
+      if (currentDeterministicPlan) phase1State.setEnhancement({ billSessionId, status: currentDeterministicPlan.status, plan: createPlanSummary(currentDeterministicPlan), diagnostics: currentDeterministicPlan.validation?.issues || [] });
       state.set('BILL_LOADED');
       phase1State.appendHistory({ billSessionId, operation: 'SOURCE_BILL_DUPLICATE', status: 'DUPLICATE_SOURCE_BILL', source_reference: importResult.metadata });
-      return { canceled: false, duplicate: true, duplicateCode: 'DUPLICATE_SOURCE_BILL', billSessionId, source: importResult.metadata, parseResult: existingParse.result || null, resolutionResult: currentResolutionRun, appState: phase1State.snapshot() };
+      return { canceled: false, duplicate: true, duplicateCode: 'DUPLICATE_SOURCE_BILL', billSessionId, source: importResult.metadata, parseResult: existingParse.result || null, resolutionResult: currentResolutionRun, enhancementPlan: currentDeterministicPlan, appState: phase1State.snapshot() };
     }
     if (importResult.status !== 'IMPORTED') throw new Error(importResult.message || importResult.code || importResult.status);
 
@@ -232,8 +338,10 @@ async function selectAndParseSourceBill() {
     });
     const parseResult = await parseStoredSourceBill(storageService, billSessionId);
     const resolutionResult = parseResult.status === PARSER_STATUSES.FAILED ? null : persistResolutionForParseResult(parseResult);
-    currentBill = { source, parserResult: parseResult, resolutionResult };
+    const enhancementPlan = resolutionResult ? buildAndPersistEnhancementPlan({ parserResult: parseResult, resolutionResult, sourceBillId: importResult.sourceBillId || billSessionId }) : null;
+    currentBill = { source, parserResult: parseResult, resolutionResult, enhancementPlan };
     currentEnhancementPlan = null;
+    currentDeterministicPlan = enhancementPlan;
     state.set(parseResult.status === PARSER_STATUSES.FAILED ? 'ERROR' : 'BILL_LOADED');
     phase1State.setCurrentBillMetadata({
       fileName: source.file_name,
@@ -249,9 +357,12 @@ async function selectAndParseSourceBill() {
       resolutionStatus: resolutionResult?.status || 'NOT_STARTED',
       resolutionCount: resolutionResult?.resultCount || 0,
       ruleSetVersion: resolutionResult?.ruleSetVersion || activeRuleSet?.ruleSetVersion || null,
-      registryVersion: resolutionResult?.registryVersion || activeRegistry()?.registryVersion || null
+      registryVersion: resolutionResult?.registryVersion || activeRegistry()?.registryVersion || null,
+      planStatus: enhancementPlan?.status || 'NOT_CREATED',
+      planId: enhancementPlan?.planId || null,
+      planSha256: enhancementPlan?.planSha256 || null,
+      readiness: enhancementPlan?.readiness || null
     });
-    phase1State.resetEnhancement({ preserveSession: true });
     if (parseResult.status === PARSER_STATUSES.FAILED) {
       phase1State.appendHistory({ billSessionId, operation: 'PDF_PARSE_FAILED', status: 'FAILED', error_code: parseResult.errorCode });
       throw Object.assign(new Error(parseResult.message || 'Source PDF could not be parsed'), { code: parseResult.errorCode || 'PDF_PARSE_FAILED' });
@@ -338,7 +449,32 @@ function createPhase1Handlers() {
     [OPERATIONS.BILL_CLEAR_CURRENT]: () => { const billSessionId = phase1State.getCurrentBillSessionId(); clearActiveBillWorkspace(); if (billSessionId) storageService?.appendAudit({ billSessionId, operation: 'CURRENT_BILL_RESET', stage: 'UI', status: 'SUCCESS' }); return phase1State.snapshot().currentBill; },
     [OPERATIONS.BILL_RESET]: () => { const billSessionId = phase1State.getCurrentBillSessionId(); clearActiveBillWorkspace(); if (billSessionId) storageService?.appendAudit({ billSessionId, operation: 'CURRENT_BILL_RESET', stage: 'UI', status: 'SUCCESS' }); return phase1State.snapshot(); },
     [OPERATIONS.BILL_SELECT]: () => selectAndParseSourceBill(),
-    [OPERATIONS.ENHANCEMENT_GET_PLAN]: () => currentEnhancementPlan ? { billSessionId: phase1State.getCurrentBillSessionId(), plan: currentEnhancementPlan } : { billSessionId: phase1State.getCurrentBillSessionId(), plan: null, message: 'No EnhancementPlan available.' },
+    [OPERATIONS.ENHANCEMENT_BUILD_PLAN]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      const plan = buildPlanForBillSession(billSessionId);
+      return { billSessionId, plan, summary: createPlanSummary(plan) };
+    },
+    [OPERATIONS.ENHANCEMENT_GET_PLAN]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return { billSessionId: null, plan: null, message: 'No bill session is active.' };
+      const loaded = storageService.readEnhancementPlan(billSessionId);
+      if (loaded.status === 'SUCCESS') { currentDeterministicPlan = loaded.plan; return { billSessionId, plan: loaded.plan }; }
+      return { billSessionId, plan: null, status: loaded.status, message: 'No EnhancementPlan available.' };
+    },
+    [OPERATIONS.ENHANCEMENT_GET_PLAN_SUMMARY]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      if (!billSessionId) return null;
+      const summary = storageService.readEnhancementPlanSummary(billSessionId);
+      if (summary.status === 'SUCCESS') return summary.summary;
+      const plan = storageService.readEnhancementPlan(billSessionId);
+      return plan.status === 'SUCCESS' ? createPlanSummary(plan.plan) : null;
+    },
+    [OPERATIONS.ENHANCEMENT_VALIDATE_PLAN]: (payload = {}) => validateStoredPlan(payload.billSessionId || phase1State.getCurrentBillSessionId()),
+    [OPERATIONS.ENHANCEMENT_REBUILD_PLAN]: (payload = {}) => {
+      const billSessionId = payload.billSessionId || phase1State.getCurrentBillSessionId();
+      const plan = buildPlanForBillSession(billSessionId);
+      return { billSessionId, plan, summary: createPlanSummary(plan) };
+    },
     [OPERATIONS.ENHANCEMENT_GET_STATUS]: () => phase1State.snapshot().enhancement,
     [OPERATIONS.FINAL_BILL_GET_STATUS]: () => phase1State.snapshot().finalBill,
     [OPERATIONS.SETTINGS_GET]: () => ({ publicConfig: publicConfig(), settings: phase1Settings, configSchemaVersion: CURRENT_SCHEMA_VERSION }),

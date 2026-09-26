@@ -10,6 +10,9 @@ const ui = {
   usage: null,
   parseResult: null,
   resolutionResult: null,
+  enhancementPlan: null,
+  planSummary: null,
+  planValidation: null,
   registryStatus: null
 };
 
@@ -39,8 +42,8 @@ function safeMessage(error) {
 function statusClass(value) {
   const normalized = String(value || '').toUpperCase();
   if (/READY|LOADED|EXECUTED|GENERATED|PASS|ACTIVE|VALIDATED|DIRECT_REGISTRY_MATCH/.test(normalized)) return 'good';
-  if (/REVIEW|PARTIAL|NOT CONFIGURED|NOT VERIFIED|NOT STARTED|NONE|NOT_INITIALIZED|NO_MATCH|UNRESOLVED/.test(normalized)) return 'warn';
-  if (/ERROR|FAILED|READ_ONLY|ACCESS|CORRUPT|INVALID|CONFLICT|REJECTED/.test(normalized)) return 'bad';
+  if (/REVIEW|PARTIAL|NOT CONFIGURED|NOT VERIFIED|NOT STARTED|NONE|NOT_INITIALIZED|NO_MATCH|UNRESOLVED|STALE/.test(normalized)) return 'warn';
+  if (/ERROR|FAILED|READ_ONLY|ACCESS|CORRUPT|INVALID|CONFLICT|REJECTED|BLOCKED/.test(normalized)) return 'bad';
   return 'neutral';
 }
 
@@ -61,7 +64,7 @@ function renderStatusStrip() {
   setStatus('statusStorage', state.storageStatus?.status || 'NOT_INITIALIZED');
   setStatus('statusBill', state.currentBill?.status || 'NONE');
   setStatus('statusRegistry', ui.registryStatus?.status || 'NOT CONFIGURED');
-  setStatus('statusEnhancement', ui.resolutionResult?.status || state.enhancement?.status || 'NOT STARTED');
+  setStatus('statusEnhancement', ui.enhancementPlan?.status || ui.planSummary?.status || state.enhancement?.status || 'NOT STARTED');
   setStatus('statusPortal', state.portal?.status || 'NOT VERIFIED');
   setStatus('statusFinalBill', state.finalBill?.status || 'NOT STARTED');
 }
@@ -75,9 +78,9 @@ function renderDashboard() {
   text('dashboardStorageHealth', `${state.storageStatus?.status || 'UNKNOWN'} · manifest ${state.storageStatus?.manifestStatus || '—'} · write probe ${state.storageStatus?.writeProbe ? 'ok' : 'not verified'}`);
   text('dashboardSession', bill.billSessionId || 'NONE');
   text('dashboardBill', bill.status === 'LOADED' ? `${metadata.fileName || bill.source?.file_name || 'Source bill'} · ${metadata.billNumber || 'Bill number unavailable'}` : 'No source bill loaded.');
-  text('dashboardEnhancement', ui.resolutionResult ? `${ui.resolutionResult.status} · ${ui.resolutionResult.resultCount || 0} resolution result(s)` : 'No resolution preview available.');
+  text('dashboardEnhancement', ui.enhancementPlan ? `${ui.enhancementPlan.status} · ${ui.enhancementPlan.actions?.length || 0} action(s) · ${ui.enhancementPlan.reviewItems?.length || 0} review` : (ui.resolutionResult ? `${ui.resolutionResult.status} · plan not built` : 'No EnhancementPlan available.'));
   text('dashboardFinalBill', state.finalBill?.status === 'NOT STARTED' ? 'Final bill workflow has not started.' : state.finalBill?.status);
-  text('nextAction', bill.status === 'LOADED' ? 'Review deterministic resolution preview. Portal readiness remains NOT VERIFIED in Phase 4.' : 'Upload a source bill to begin.');
+  text('nextAction', bill.status === 'LOADED' ? 'Review deterministic EnhancementPlan. Portal readiness remains NOT VERIFIED in Phase 5.' : 'Upload a source bill to begin.');
 }
 
 function renderSourceBill() {
@@ -101,7 +104,7 @@ function renderSourceBill() {
     if (!ui.sourceRecords.length) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = 7;
+      cell.colSpan = 8;
       cell.textContent = 'No persisted source bill records found.';
       row.appendChild(cell);
       body.appendChild(row);
@@ -111,7 +114,8 @@ function renderSourceBill() {
         const row = document.createElement('tr');
         const parserSummary = record.parseResult ? `${record.parseResult.status} · ${record.parseResult.candidateCount || 0}` : 'NOT_STARTED';
         const resolutionSummary = record.resolutionResult ? `${record.resolutionResult.status} · ${record.resolutionResult.resultCount || 0}` : 'NOT_STARTED';
-        for (const value of [meta.importedAt || '—', meta.billSessionId || record.billSessionId || '—', meta.originalFileName || '—', record.status || meta.status || '—', parserSummary, resolutionSummary, meta.sha256 ? `${meta.sha256.slice(0, 12)}…` : '—']) {
+        const planSummary = record.planSummary ? `${record.planSummary.status} · ${record.planSummary.actionCount || 0}/${record.planSummary.reviewCount || 0}` : 'NOT_CREATED';
+        for (const value of [meta.importedAt || '—', meta.billSessionId || record.billSessionId || '—', meta.originalFileName || '—', record.status || meta.status || '—', parserSummary, resolutionSummary, planSummary, meta.sha256 ? `${meta.sha256.slice(0, 12)}…` : '—']) {
           const cell = document.createElement('td');
           cell.textContent = value;
           row.appendChild(cell);
@@ -154,46 +158,83 @@ function renderCandidates(candidates) {
   text('candidateEvidence', JSON.stringify(candidates[0].evidence || {}, null, 2));
 }
 
-function renderPlan() {
-  const resolution = ui.resolutionResult;
-  text('enhancementState', resolution?.status || 'No resolution');
-  text('enhancementBill', activeState().currentBill?.billSessionId ? `Active bill session: ${activeState().currentBill.billSessionId}` : 'No source bill is active.');
-  text('executionStatus', 'Portal readiness has not been verified. ResolutionResult rows are not executable portal actions.');
-  const body = $('planRows');
+function setRows(bodyId, rows, columns, emptyMessage) {
+  const body = $(bodyId);
+  if (!body) return;
   body.replaceChildren();
-  if (!resolution || !Array.isArray(resolution.results) || !resolution.results.length) {
-    $('noPlanMessage').hidden = false;
-    $('planTableWrap').hidden = true;
-    text('reviewSummary', 'No ResolutionResult has been generated for the current bill.');
-    text('enhancementDiagnostics', JSON.stringify({ registry: ui.registryStatus || null }, null, 2));
+  if (!rows.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = columns.length;
+    cell.textContent = emptyMessage;
+    row.appendChild(cell);
+    body.appendChild(row);
     return;
   }
-  $('noPlanMessage').hidden = true;
-  $('planTableWrap').hidden = false;
-  for (const result of resolution.results || []) {
-    const evidence = result.evidence?.[0] || {};
+  for (const item of rows) {
     const row = document.createElement('tr');
-    const values = [
-      evidence.pageNumber || '—',
-      evidence.section || result.input?.section || '—',
-      result.input?.description || '—',
-      result.input?.codeRaw || '—',
-      result.output?.finalCode || '—',
-      result.output?.quantity ?? result.input?.quantity ?? '—',
-      result.status,
-      result.ruleId || result.registryEntryId || '—',
-      evidence.sourceText ? `${evidence.sourceText.slice(0, 80)}${evidence.sourceText.length > 80 ? '…' : ''}` : result.reason
-    ];
-    for (const value of values) {
+    for (const column of columns) {
       const cell = document.createElement('td');
-      cell.textContent = value == null || value === '' ? '—' : String(value);
+      const raw = typeof column === 'function' ? column(item) : item[column];
+      cell.textContent = raw == null || raw === '' ? '—' : String(raw);
       row.appendChild(cell);
     }
     body.appendChild(row);
   }
-  const reviewCount = (resolution.results || []).filter((item) => ['REVIEW_REQUIRED', 'UNRESOLVED_MAPPING', 'RULE_CONFLICT', 'NO_MATCH', 'REJECTED'].includes(item.status)).length;
-  text('reviewSummary', reviewCount ? `${reviewCount} resolution item(s) require review. Parser success did not force business-rule success.` : 'All resolution rows have deterministic validated/direct mappings. They are still not portal actions in Phase 4.');
-  text('enhancementDiagnostics', JSON.stringify({ registryVersion: resolution.registryVersion, registrySourceHash: resolution.registrySourceHash, ruleSetVersion: resolution.ruleSetVersion, counts: resolution.counts }, null, 2));
+}
+
+function renderPlan() {
+  const plan = ui.enhancementPlan;
+  const billSessionId = activeState().currentBill?.billSessionId;
+  text('enhancementState', plan?.status || 'No plan');
+  text('enhancementBill', billSessionId ? `Active bill session: ${billSessionId}` : 'No source bill is active.');
+  text('executionStatus', plan ? `${plan.readiness || 'NOT_READY'} · portal execution is not implemented in Phase 5.` : 'No validated plan available.');
+  text('planVersion', plan ? `${plan.planVersion || '—'} · schema ${plan.schemaVersion || '—'}` : '—');
+  text('planId', plan?.planId || '—');
+  text('planHash', plan?.planSha256 || '—');
+  text('planRegistry', plan ? `${plan.registryContext?.registryVersion || 'NONE'} · ${plan.registryContext?.registrySourceHash ? `${plan.registryContext.registrySourceHash.slice(0, 12)}…` : 'hash unavailable'}` : '—');
+  text('planRuleSet', plan?.ruleContext?.ruleSetVersion || '—');
+  $('noPlanMessage').hidden = !!plan;
+
+  const actions = plan?.actions || [];
+  const reviews = plan?.reviewItems || [];
+  const excluded = plan?.excludedItems || [];
+  setRows('actionRows', actions, [
+    (item) => item.actionId,
+    (item) => item.finalCode || item.resolved?.finalCode,
+    (item) => item.description || item.input?.description,
+    (item) => item.quantity?.value ?? item.resolved?.quantity,
+    (item) => item.quantity?.unit || item.resolved?.unit,
+    (item) => `${item.authority?.type || '—'} ${item.authority?.status || ''}`.trim(),
+    (item) => `${item.provenance?.ruleId || item.provenance?.registryEntryId || '—'} · ${item.provenance?.sourceCandidateIds?.join(', ') || '—'}`
+  ], 'No executable actions. Validated evidence is required before any action is emitted.');
+  setRows('reviewRows', reviews, [
+    (item) => item.reviewId,
+    (item) => item.reasonCode,
+    (item) => item.description,
+    (item) => item.rawCode,
+    (item) => item.sourceStatus,
+    (item) => (item.requiredEvidence || []).join(', ')
+  ], 'No review items.');
+  setRows('excludedRows', excluded, [
+    (item) => item.excludedId,
+    (item) => item.reasonCode,
+    (item) => item.description,
+    (item) => item.rawCode,
+    (item) => item.candidateId
+  ], 'No excluded parser candidates.');
+
+  const diagnostics = plan ? {
+    planId: plan.planId,
+    planSha256: plan.planSha256,
+    status: plan.status,
+    readiness: plan.readiness,
+    diagnostics: plan.diagnostics,
+    validation: ui.planValidation || plan.validation || null,
+    summary: ui.planSummary || null,
+    resolutionCounts: ui.resolutionResult?.counts || null
+  } : { registry: ui.registryStatus || null, resolution: ui.resolutionResult ? { status: ui.resolutionResult.status, counts: ui.resolutionResult.counts } : null };
+  text('enhancementDiagnostics', JSON.stringify(diagnostics, null, 2));
 }
 
 function renderFinalBill() {
@@ -276,8 +317,12 @@ async function refreshState() {
     ui.sourceRecords = sourceRecords;
     ui.auditRecords = auditRecords;
     ui.registryStatus = registryStatus;
-    ui.parseResult = appState.currentBill?.billSessionId ? await suite().sourceBill.getParseResult(appState.currentBill.billSessionId).catch(() => null) : null;
-    ui.resolutionResult = appState.currentBill?.billSessionId ? await suite().resolution.getResult(appState.currentBill.billSessionId).catch(() => null) : null;
+    const billSessionId = appState.currentBill?.billSessionId;
+    ui.parseResult = billSessionId ? await suite().sourceBill.getParseResult(billSessionId).catch(() => null) : null;
+    ui.resolutionResult = billSessionId ? await suite().resolution.getResult(billSessionId).catch(() => null) : null;
+    const planPayload = billSessionId ? await suite().enhancement.getPlan(billSessionId).catch(() => null) : null;
+    ui.enhancementPlan = planPayload?.plan || null;
+    ui.planSummary = billSessionId ? await suite().enhancement.getPlanSummary(billSessionId).catch(() => null) : null;
     renderAll();
   } catch (error) {
     showBanner(safeMessage(error), 'error');
@@ -311,6 +356,30 @@ async function clearBill() {
   try {
     await suite().bill.clearCurrent();
     showBanner('Current bill session cleared. Historical records retained.', 'success');
+    await refreshState();
+  } catch (error) { showBanner(safeMessage(error), 'error'); }
+}
+
+async function buildPlan(rebuild = false) {
+  const billSessionId = activeState().currentBill?.billSessionId;
+  if (!billSessionId) { showBanner('Load a source bill before building an EnhancementPlan.', 'warning'); return; }
+  try {
+    const payload = rebuild ? await suite().enhancement.rebuildPlan(billSessionId) : await suite().enhancement.buildPlan(billSessionId);
+    ui.enhancementPlan = payload?.plan || null;
+    ui.planSummary = payload?.summary || null;
+    ui.planValidation = payload?.plan?.validation || null;
+    showBanner(`${rebuild ? 'Rebuilt' : 'Built'} EnhancementPlan ${payload?.plan?.planId || ''} (${payload?.plan?.status || 'UNKNOWN'}).`, 'success');
+    await refreshState();
+  } catch (error) { showBanner(safeMessage(error), 'error'); }
+}
+
+async function validatePlan() {
+  const billSessionId = activeState().currentBill?.billSessionId;
+  if (!billSessionId) { showBanner('Load a source bill before validating an EnhancementPlan.', 'warning'); return; }
+  try {
+    const payload = await suite().enhancement.validatePlan(billSessionId);
+    ui.planValidation = payload?.validation || payload;
+    showBanner(`Plan validation ${ui.planValidation?.valid ? 'passed' : 'requires attention'}.`, ui.planValidation?.valid ? 'success' : 'warning');
     await refreshState();
   } catch (error) { showBanner(safeMessage(error), 'error'); }
 }
@@ -354,6 +423,9 @@ function bind() {
   $('selectSourceBill').addEventListener('click', selectBill);
   $('clearSourceBill').addEventListener('click', clearBill);
   $('openSourceFolder').addEventListener('click', () => suite().storage.openFolder('Source_Bills').catch((error) => showBanner(safeMessage(error), 'error')));
+  $('buildEnhancementPlan').addEventListener('click', () => buildPlan(false));
+  $('validateEnhancementPlan').addEventListener('click', validatePlan);
+  $('rebuildEnhancementPlan').addEventListener('click', () => buildPlan(true));
   $('openFinalFolder').addEventListener('click', () => suite().storage.openFolder('Final_Bills').catch((error) => showBanner(safeMessage(error), 'error')));
   $('openAuditFolder').addEventListener('click', () => suite().storage.openFolder('Audit').catch((error) => showBanner(safeMessage(error), 'error')));
   $('openFailuresFolder').addEventListener('click', () => suite().storage.openFolder('Failures').catch((error) => showBanner(safeMessage(error), 'error')));

@@ -26,7 +26,7 @@
         <button class="nav-item" type="button" data-route="settings">Settings</button>
         <button class="nav-item" type="button" data-route="diagnostics">Diagnostics</button>
       </nav>
-      <div class="sidebar-note">Portal readiness is not verified in Phase 4.</div>
+      <div class="sidebar-note">Portal readiness is not verified in Phase 5.</div>
     </aside>
 
     <main class="main">
@@ -89,7 +89,7 @@
             <button id="clearSourceBill" type="button">Clear current bill</button>
             <button id="openSourceFolder" type="button">Open Source_Bills</button>
           </div>
-          <div class="notice">Phase 4 keeps parser evidence separate from business validation. Source candidates are resolved only through the active registry and explicit deterministic rules.</div>
+          <div class="notice">Phase 5 keeps parser evidence, deterministic resolution, and executable plan actions separated. Only validated plan actions may advance to later portal-validation work.</div>
           <dl class="details">
             <div><dt>billSessionId</dt><dd id="sourceSession">NONE</dd></div>
             <div><dt>Filename</dt><dd id="sourceFile">No source bill loaded.</dd></div>
@@ -115,7 +115,7 @@
           <h3>Persisted Source Bills</h3>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Imported</th><th>billSessionId</th><th>Original file</th><th>Status</th><th>Parser</th><th>Resolution</th><th>SHA-256</th></tr></thead>
+              <thead><tr><th>Imported</th><th>billSessionId</th><th>Original file</th><th>Status</th><th>Parser</th><th>Resolution</th><th>Plan</th><th>SHA-256</th></tr></thead>
               <tbody id="sourceRecordRows"></tbody>
             </table>
           </div>
@@ -124,23 +124,54 @@
 
       <section class="view" id="view-enhancement" data-title="Enhancement">
         <article class="panel">
-          <div class="panel-head"><div><h2>Resolution preview</h2><p>Review deterministic registry/rule resolution. These rows are not portal-executable actions.</p></div><span id="enhancementState">No resolution</span></div>
+          <div class="panel-head">
+            <div><h2>EnhancementPlan</h2><p>Deterministic evidence-gated plan. This is not portal execution and not final bill generation.</p></div>
+            <span id="enhancementState">No plan</span>
+          </div>
+          <div class="actions">
+            <button class="primary" id="buildEnhancementPlan" type="button">Build plan</button>
+            <button id="validateEnhancementPlan" type="button">Validate plan</button>
+            <button id="rebuildEnhancementPlan" type="button">Rebuild plan</button>
+          </div>
           <div class="subgrid">
             <section><h3>Current Bill</h3><p id="enhancementBill" class="empty-text">No source bill is active.</p></section>
-            <section><h3>Execution Status</h3><p id="executionStatus" class="empty-text">Portal readiness has not been verified.</p></section>
+            <section><h3>Readiness</h3><p id="executionStatus" class="empty-text">No validated plan available.</p></section>
           </div>
-          <h3>ResolutionResult</h3>
-          <p id="noPlanMessage" class="empty-text">No resolution preview available.</p>
-          <div class="table-wrap" id="planTableWrap" hidden>
+          <dl class="details">
+            <div><dt>Plan version</dt><dd id="planVersion">—</dd></div>
+            <div><dt>Plan ID</dt><dd id="planId">—</dd></div>
+            <div><dt>Plan SHA-256</dt><dd id="planHash">—</dd></div>
+            <div><dt>Registry</dt><dd id="planRegistry">—</dd></div>
+            <div><dt>Rule set</dt><dd id="planRuleSet">—</dd></div>
+          </dl>
+          <p id="noPlanMessage" class="empty-text">No EnhancementPlan has been generated for the current bill.</p>
+
+          <h3>Actions</h3>
+          <div class="table-wrap" id="actionTableWrap">
             <table>
-              <thead><tr><th>Page</th><th>Section</th><th>Description</th><th>Raw Code</th><th>Resolved Code</th><th>Quantity</th><th>Status</th><th>Rule</th><th>Evidence</th></tr></thead>
-              <tbody id="planRows"></tbody>
+              <thead><tr><th>Action ID</th><th>Final Code</th><th>Description</th><th>Quantity</th><th>Unit</th><th>Authority</th><th>Provenance</th></tr></thead>
+              <tbody id="actionRows"></tbody>
             </table>
           </div>
+
           <h3>Review Required</h3>
-          <p id="reviewSummary" class="empty-text">Resolution review queue has not been loaded.</p>
+          <div class="table-wrap" id="reviewTableWrap">
+            <table>
+              <thead><tr><th>Review ID</th><th>Reason</th><th>Description</th><th>Raw Code</th><th>Status</th><th>Required evidence</th></tr></thead>
+              <tbody id="reviewRows"></tbody>
+            </table>
+          </div>
+
+          <h3>Excluded</h3>
+          <div class="table-wrap" id="excludedTableWrap">
+            <table>
+              <thead><tr><th>Excluded ID</th><th>Reason</th><th>Description</th><th>Raw Code</th><th>Candidate</th></tr></thead>
+              <tbody id="excludedRows"></tbody>
+            </table>
+          </div>
+
           <h3>Diagnostics</h3>
-          <pre id="enhancementDiagnostics">No resolution diagnostics available.</pre>
+          <pre id="enhancementDiagnostics">No plan diagnostics available.</pre>
         </article>
       </section>
 
@@ -150,7 +181,7 @@
           <div class="subgrid">
             <section><h3>Final Bill Source</h3><p class="empty-text">No final bill PDF loaded.</p></section>
             <section><h3>Extracted Sections</h3><p class="empty-text">No supported final-bill sections extracted.</p></section>
-            <section><h3>Editable Metadata</h3><p class="empty-text">Editable final-bill formatting is not enabled in Phase 4.</p></section>
+            <section><h3>Editable Metadata</h3><p class="empty-text">Editable final-bill formatting is not enabled in Phase 5.</p></section>
             <section><h3>Composition Preview</h3><p class="empty-text">Final bill composition engine is not yet enabled.</p></section>
             <section><h3>Validation</h3><p class="empty-text">No final-bill validation has run.</p></section>
             <section><h3>Output Status</h3><p class="empty-text">No final PDF has been generated.</p></section>

@@ -507,6 +507,10 @@ class StorageService {
         if (fs.existsSync(parse)) files.push(parse);
         const resolution = path.join(sourceRoot, id, 'resolution-result.json');
         if (fs.existsSync(resolution)) files.push(resolution);
+        const plan = path.join(sourceRoot, id, 'enhancement', 'plan.json');
+        if (fs.existsSync(plan)) files.push(plan);
+        const summary = path.join(sourceRoot, id, 'enhancement', 'plan-summary.json');
+        if (fs.existsSync(summary)) files.push(summary);
       }
     }
     const activeRegistry = path.join(this.assertRoot(), 'CGHS', 'active-registry.json');
@@ -678,6 +682,40 @@ class StorageService {
     return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, result: loaded.value };
   }
 
+  getEnhancementPlanDirectory(billSessionId) {
+    return path.join(this.getSourceBillDirectory(billSessionId), 'enhancement');
+  }
+
+  getEnhancementPlanPath(billSessionId) {
+    return path.join(this.getEnhancementPlanDirectory(billSessionId), 'plan.json');
+  }
+
+  getEnhancementPlanSummaryPath(billSessionId) {
+    return path.join(this.getEnhancementPlanDirectory(billSessionId), 'plan-summary.json');
+  }
+
+  writeEnhancementPlan(billSessionId, plan, summary = null) {
+    const directory = this.getEnhancementPlanDirectory(billSessionId);
+    fs.mkdirSync(directory, { recursive: true });
+    const planPath = this.getEnhancementPlanPath(billSessionId);
+    const summaryPath = this.getEnhancementPlanSummaryPath(billSessionId);
+    this.writeJson(planPath, plan);
+    if (summary) this.writeJson(summaryPath, summary);
+    return { status: OPERATION_STATUS.SUCCESS, path: planPath, summaryPath, plan, summary };
+  }
+
+  readEnhancementPlan(billSessionId) {
+    const loaded = this.readJson(this.getEnhancementPlanPath(billSessionId), { fallback: null, preserveCorrupt: true });
+    if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
+    return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, plan: loaded.value };
+  }
+
+  readEnhancementPlanSummary(billSessionId) {
+    const loaded = this.readJson(this.getEnhancementPlanSummaryPath(billSessionId), { fallback: null, preserveCorrupt: true });
+    if (loaded.status !== OPERATION_STATUS.SUCCESS) return loaded;
+    return { status: OPERATION_STATUS.SUCCESS, path: loaded.path, summary: loaded.value };
+  }
+
   listSourceBills(options = {}) {
     const root = this.getFolderPath('Source_Bills');
     if (!fs.existsSync(root)) return [];
@@ -688,11 +726,13 @@ class StorageService {
         const billSessionId = record.metadata?.billSessionId || record.billSessionId || path.basename(record.paths?.directory || '');
         const parse = billSessionId ? this.readParseResult(billSessionId) : null;
         const resolution = billSessionId ? this.readResolutionResult(billSessionId) : null;
+        const plan = billSessionId ? this.readEnhancementPlanSummary(billSessionId) : null;
         return {
           ...record,
           billSessionId,
           parseResult: parse?.status === OPERATION_STATUS.SUCCESS ? { status: parse.result.status, pageCount: parse.result.pageCount, candidateCount: parse.result.candidateCount, runId: parse.result.runId, parserVersion: parse.result.parserVersion } : null,
-          resolutionResult: resolution?.status === OPERATION_STATUS.SUCCESS ? { status: resolution.result.status, resultCount: resolution.result.resultCount, runId: resolution.result.runId, ruleSetVersion: resolution.result.ruleSetVersion, registryVersion: resolution.result.registryVersion } : null
+          resolutionResult: resolution?.status === OPERATION_STATUS.SUCCESS ? { status: resolution.result.status, resultCount: resolution.result.resultCount, runId: resolution.result.runId, ruleSetVersion: resolution.result.ruleSetVersion, registryVersion: resolution.result.registryVersion } : null,
+          planSummary: plan?.status === OPERATION_STATUS.SUCCESS ? plan.summary : null
         };
       })
       .sort((a, b) => String(b.metadata?.importedAt || '').localeCompare(String(a.metadata?.importedAt || '')));
