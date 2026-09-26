@@ -3,8 +3,6 @@ on:
   workflow_dispatch:
   push:
     tags: ['v*']
-permissions:
-  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -17,38 +15,7 @@ jobs:
         with: {python-version: '3.11', cache: 'pip', cache-dependency-path: packaging/requirements-executor.txt}
       - name: Build and verify Windows release
         shell: powershell
-        run: |
-          $ErrorActionPreference = 'Continue'
-          powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1 *> build-log.txt
-          $code = $LASTEXITCODE
-          Get-Content build-log.txt
-          Write-Host "EXIT_CODE=$code"
-          exit $code
-      - name: TEMP diagnostics (always)
-        if: always()
-        shell: powershell
-        run: |
-          git config user.email "ci-diagnostics@example.com"
-          git config user.name "CI Diagnostics"
-          git checkout --detach
-          git checkout -B ci-diagnostics-$env:GITHUB_RUN_ID
-          New-Item -ItemType Directory -Force -Path ci-diagnostics | Out-Null
-          if (Test-Path build-log.txt) { Copy-Item build-log.txt ci-diagnostics/build-log.txt -Force }
-          foreach ($f in @('release-manifest.json','SHA256SUMS.txt','WINDOWS_RELEASE_ACCEPTANCE.txt')) {
-            $src = Join-Path 'release' $f
-            if (Test-Path $src) { Copy-Item $src (Join-Path 'ci-diagnostics' $f) -Force }
-          }
-          if (Test-Path release) {
-            Get-ChildItem release -Recurse -File | Select-Object Name, Length, @{n='SHA256';e={(Get-FileHash $_.FullName -Algorithm SHA256).Hash}} | Format-Table -AutoSize | Out-String -Width 4096 | Set-Content ci-diagnostics/release-listing.txt
-          }
-          if (Test-Path build-resources/python-executor) {
-            Get-ChildItem build-resources/python-executor -Recurse -File | Select-Object Name, Length, @{n='SHA256';e={(Get-FileHash $_.FullName -Algorithm SHA256).Hash}} | Format-Table -AutoSize | Out-String -Width 4096 | Set-Content ci-diagnostics/executor-listing.txt
-          }
-          git add -f ci-diagnostics
-          git commit -m "ci: diagnostics for run $env:GITHUB_RUN_ID" --allow-empty
-          git push "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git" HEAD:refs/heads/ci-diagnostics-$env:GITHUB_RUN_ID --force
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64-release
