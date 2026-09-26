@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: '20', cache: 'npm'}
       - uses: actions/setup-python@v5
-        with: {python-version: '3.11', cache: 'pip'}
+        with: {python-version: '3.11', cache: 'pip', cache-dependency-path: packaging/requirements-executor.txt}
       - name: Build and verify Windows release
         shell: powershell
         run: powershell -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1
