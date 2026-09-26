@@ -1,173 +1,238 @@
-# CGHS Billing Suite VNEXT — Foundation Architecture
+# Architecture
 
-## Phase 1 decision
+## System overview
 
-Electron remains the desktop technology because the repository already contains a proven Electron baseline. Phase 1 introduces a minimal folder-based shell without moving, importing, or changing the legacy Python enhancement system or HFOS application.
-
-## Runtime layers
+CGHS Billing Suite VNEXT is a local Electron desktop application. Electron hosts a vanilla HTML/CSS/JavaScript UI and a Node.js main process. Node services own PDF ingestion, deterministic planning, reviews, Cases, validation, final-bill processing, and local persistence. Portal execution crosses a narrow JSON boundary into the preserved Python executor, which attaches Selenium to a manually authenticated Chrome session through CDP.
 
 ```text
-Renderer (`src/ui`)
-  ↓ explicit read-only IPC methods
-Preload (`src/desktop/preload.js`)
-  ↓ allowlisted channels only
-Electron main (`src/desktop/main.js`)
-  ↓
-Core foundations (`src/core`)
-  ├─ configuration
-  ├─ external Storage
-  ├─ structured logging
-  └─ application state
+Electron renderer
+  ↕ constrained preload IPC
+Electron main process
+  → Node domain services
+  → external Storage
+  → Portal Adapter / Python runner
+       → packaged portal-executor.exe (production)
+       → portal_bridge.py
+       → app (1).py — sole Selenium/CDP executor
+       → CGHS portal
 ```
 
-The renderer has `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. It receives only four explicit methods: application status, Storage information, public configuration, and renderer-ready reporting. There is no shell execution, arbitrary path access, file mutation, parser, Selenium, CDP, or portal IPC.
+No Node service duplicates Selenium behavior, and Python does not own CGHS planning rules.
 
-## External Storage
+## High-level data flows
 
-Default runtime location:
+### Initial bill and portal flow
 
 ```text
-<OS Documents>/CGHS Billing Suite VNEXT/Storage/
+Initial PDF
+  → bill-ingestion services
+  → normalized Bill Model
+  → CGHS rate repository + deterministic rule engine
+  → EnhancementPlan
+  → Review Queue / Custom Code Registry freshness checks
+  → Production Validation Run and explicit operator confirmation
+  → Portal Adapter
+  → Legacy Python bridge/executor
+  → exact option selection
+  → actual portal row/quantity reconciliation
+  → Portal Execution Audit
+  → Case verification state
 ```
 
-An absolute override can be supplied with `VNEXT_STORAGE_PATH`. Relative paths and paths inside the application/package are rejected. Startup creates and write-checks:
-
-- `Source_Bills/`
-- `Final_Bills/`
-- `Supporting_Sections/`
-- `Logs/`
-- `Failed/`
-- `Reports/`
-
-The repository `storage/` tree is a documented empty template only; runtime user data is never written there. Long-term naming, encryption, retention, and migration remain later-phase decisions.
-
-## Existing database
-
-The old root `main.js` contains the v5 encrypted sql.js database implementation. It is intentionally untouched and remains reference/legacy code. The Phase 1 shell does not create a database. Future phases must decide migration only after regression characterization.
-
-## Error and shutdown boundary
-
-Initialization is guarded. Configuration, Storage, logger, and renderer failures are surfaced via logs/console and a desktop error dialog where possible. Uncaught exceptions and rejected promises are fatal and controlled. Shutdown writes a final structured log entry. If Storage itself cannot be initialized, writing to its log directory is impossible; the error is still surfaced through stderr and the desktop dialog.
-
-## Application state
-
-`src/core/app-state.js` declares the PRD workflow vocabulary and initializes to `IDLE`. Phase 1 does not execute transitions or claim completed business work.
-
-## Phase 2 bill-ingestion boundary
-
-`src/services/bill-ingestion/` now owns local PDF loading and validation, page-aware text extraction, semantic section segmentation, metadata/item/Bed Details parsing, syntactic code normalization, exact-expression aggregation, Patient Payable exclusion, diagnostics, and Normalized Bill Model creation.
+### Final-bill flow
 
 ```text
-Local PDF → pdf-loader → page-aware extracted document → bill-parser → BillDocument
+Manually obtained Final PDF
+  → SHA-256 identity
+  → deterministic Case matching
+  → final-section extraction
+  → Patient Payable exclusion
+  → CompletedBill draft
+  → explicit review/match resolution where needed
+  → completed package in external Storage
 ```
 
-Every page retains raw text and page number. Every extracted section/item retains page and raw source context. Patient Payable is represented as an excluded semantic context, including nested IP Pharmacy; exclusion is marker/context based rather than page based. Aggregation includes only primary items and groups only exact normalized expressions within the same semantic section. No rate validation or CGHS quantity/business calculation occurs.
-
-The Electron main process exposes one controlled `bill:select-and-parse` operation through preload. The renderer can select a PDF and display parsing status/counts; it receives no unrestricted filesystem API.
-
-`src/services/settlement/README.md` is the only new settlement artifact. Registration-ID reconciliation, IP-first/OP-fallback matching, Bill No/UHID enrichment, and settlement statuses remain a separate future service and are not imported into parsing.
-
-## Phase 3 deterministic CGHS service
-
-`src/services/cghs/` consumes the Phase 2 `BillDocument` and produces a machine-readable `EnhancementPlan` without portal access.
+### Inbox flow
 
 ```text
-BillDocument
-  ├─ exact direct-code aggregates → rate repository
-  ├─ Bed Details / Room Rent → CN002, CC001, WC001 rules → rate repository
-  └─ oxygen source rows → CC002 rule → rate repository
-                              ↓
-                       EnhancementPlan
+Initial or Final inbox
+  → existing InboxScanner stability check
+  → SHA-256
+  → duplicate/source-index check
+  → bounded InboxWatcher queue when explicitly enabled
+  → existing CaseWorkflowService
 ```
 
-The rate-list layer loads, validates, normalizes, indexes, and looks up local JSON sources. The only repository rate data is a 1,998-record snapshot extracted byte-for-byte from the embedded `MASTER_CGHS` object in `CGHS_Billing_Suite_Pro.html`. Its source/effective version cannot be proven, so metadata and every resulting plan identify it as `RATE_SOURCE_UNDEFINED`; its rates are visible as reference evidence but cannot produce financial amounts. A separately supplied source explicitly marked `AUTHORITATIVE` can produce deterministic rate × quantity amounts. Auditable custom/local entries are indexed separately and never overwrite source records.
+The `InboxWatcher` is an optional scheduler around the existing scanner. It does not acquire the portal lock, change the active case, call Selenium, execute plans, or discharge.
 
-Dedicated rules preserve legacy behavior: CN002 uses ICU rows ×3 plus supported ward rows ×2; CC001 counts ICU evidence; WC001 counts supported ward evidence; and CC002 evaluates oxygen rows as half day 12/full day 24/unqualified legacy single unit 1. Ambiguous categories or oxygen phrases return `REVIEW_REQUIRED`. Raw CN002/CC001/WC001 and raw C002/CC002 candidates are rejected from direct counting and retained in audit.
+## Runtime components
 
-Compound syntax is consumed from Phase 2. Each base component is looked up, but expressions with qualifiers or multiple components remain `UNRESOLVED_COMPOUND`/`RULE_UNDEFINED`; no `+L` semantics are invented.
+### Desktop and UI
 
-The Electron renderer receives the plan through the existing controlled PDF operation and shows a small diagnostics table. No rate-editing UI, portal operation, Registration-ID matching, or Settlement/Reconciliation processing is exposed.
+- `src/desktop/main.js` — Electron lifecycle, IPC registration, service composition, active UI context, and shutdown.
+- `src/desktop/preload.js` — context-isolated renderer API.
+- `src/ui/index.html`, `renderer.js`, `styles.css` — vanilla desktop UI for Cases, parsing, plans, reviews, validation, portal control, final bills, and watcher operations.
 
-## Phase 4 legacy portal boundary
+The renderer does not read files or start processes directly; privileged operations use preload IPC.
+
+### Core runtime
+
+- `src/core/config.js` — validated runtime configuration.
+- `src/core/user-config.js` — external user-config initialization and non-destructive schema migration.
+- `src/core/storage.js` — external Storage resolution and required-folder initialization.
+- `src/core/logger.js` — local production logging.
+- `src/core/runtime-paths.js` — development versus packaged resource resolution.
+- `src/core/release-tools.js` — artifact hashing and release-manifest generation.
+
+### Bill ingestion
+
+`src/services/bill-ingestion/` owns PDF text loading, pages, logical rows, field parsing, section detection, code normalization, compound syntax detection, aggregation, bed details, and the normalized Bill Model. It does not decide portal behavior.
+
+The implementation is text-based. OCR is not present.
+
+### CGHS planning
+
+`src/services/cghs/` owns:
+
+- the bundled reference snapshot and repository abstraction;
+- deterministic rule modules;
+- `EnhancementPlan` construction; and
+- plan provenance and statuses.
+
+The bundled snapshot is explicitly `RATE_SOURCE_UNDEFINED`; it is not documented as authoritative.
+
+### Reviews and custom codes
+
+`src/services/custom-codes/` owns the persistent Custom Code Registry and Review Queue. Custom records are local, audited, revisioned, and separate from bundled reference data. Relevant registry changes can make an existing plan `PLAN_STALE`.
+
+### Cases and intake
+
+`src/services/cases/` owns:
+
+- Case manifests and source-hash index;
+- allowlisted state transitions;
+- active-case portal lock;
+- initial/final import orchestration;
+- inbox stability scanning;
+- optional periodic `InboxWatcher`; and
+- restart recovery.
+
+Only one Case can own portal execution. Restarted `PORTAL_EXECUTING` work becomes `RECOVERY_REQUIRED`; it is not auto-resumed.
+
+### Validation
+
+`src/services/validation/` owns two related layers:
+
+- Phase 9 expected-versus-actual bill/plan validation and discrepancy persistence; and
+- persistent Phase 12 `Production Validation Run` records linking source identity, parser/plan/registry versions, explicit plan confirmation, portal results, timing, notes, final bill, and completed storage.
+
+Validation observes and annotates existing artifacts. It does not mutate business logic or expected fixtures.
+
+### Final bill
+
+`src/services/final-bill/` owns deterministic initial/final reconciliation, final pharmacy/consumable extraction, Patient Payable exclusion, `CompletedBill` creation, explicit match resolution, and completed-package persistence.
+
+### Portal boundary
+
+- `src/adapters/legacy-portal/plan-adapter.js` filters the immutable `EnhancementPlan` into executable and blocked records.
+- `src/services/portal/portal-execution-service.js` normalizes executor results for Node audit and Case workflow.
+- `src/adapters/legacy-portal/python-runner.js` safely starts the bridge/helper with `spawn`, argument arrays, `shell: false`, timeout, structured stdout, stderr, exit, and explicit availability errors.
+- `src/adapters/legacy-portal/portal_bridge.py` validates the JSON contract and invokes the preserved executor.
+- `app (1).py` remains the sole Selenium/CDP browser executor.
+- `portal_execution_core.py` is a Selenium-free decision helper for exact matching, reconciliation, retries, metrics, and offline tests; it is not a second browser engine.
+
+The Python executor consumes approved actions. It must not add codes, reinterpret rules, alter quantities, or modify the Custom Code Registry.
+
+### Settlement
+
+`src/services/settlement/` contains only an isolation README. Settlement/reconciliation is not implemented in the active application architecture.
+
+## Data ownership
+
+| Artifact | Owner | Persistence |
+|---|---|---|
+| Normalized Bill Model | bill-ingestion services | Case `normalized/` artifacts |
+| `EnhancementPlan` | CGHS planning services | Case `enhancement/plan.json` |
+| Custom Code Registry | custom-code service | external `Storage/Custom_Codes/` |
+| Review Queue | review service, derived from plan/validation | Case/UI context and audit |
+| Case | case store/workflow | external `Storage/Cases/` |
+| Portal Execution Audit | portal execution service + Case workflow | Case `enhancement/` artifact |
+| Production Validation Run | production-validation service | Case `validation/production/` |
+| `CompletedBill` | final-bill services | Case artifacts and completed package |
+| Watcher audit | `InboxWatcher` | external `Storage/Logs/inbox-watcher.jsonl` |
+
+## External Storage boundary
+
+Runtime user data must be outside application files and `app.asar`.
+
+Default Windows Storage:
 
 ```text
-EnhancementPlan → plan-adapter.js safety gate → portal-execution-service.js
-  → python-runner.js JSON child process → portal_bridge.py
-  → existing BatchAutomationThread / TreatmentPlanOrchestrator
-  → Chrome CDP 127.0.0.1:9222 → verified portal rows → execution audit
+%USERPROFILE%\Documents\CGHS Billing Suite VNEXT\Storage
+├── Inbox\Initial
+├── Inbox\Final
+├── Cases
+├── Custom_Codes
+├── Audit
+├── Bills
+├── Logs
+├── Reports
+├── Source_Bills
+├── Final_Bills
+├── Supporting_Sections
+└── Failed
 ```
 
-The adapter passes structured code, final quantity, evidence, rule/reason, classification, derived flag, and audit metadata only. Unsafe and excluded records remain in the audit and never invoke Selenium. The bridge contains no selectors or CGHS rules: it synchronously invokes the existing executor in `app (1).py`. Minimal additive instrumentation records per-action `EXECUTED`, `ALREADY_PRESENT`, or `FAILED` outcomes while preserving legacy PyQt signals, retries, diagnostics, reconciliation, and final audit behavior.
+The configured Storage path must be absolute and outside the application package. Initialization creates missing directories but does not reset existing data.
 
-Electron exposes allowlisted preview and explicit execute IPC calls. The UI shows executable/blocked counts, requires confirmation, reports verification/status, and renders the structured audit. It never handles credentials or login. Settlement/Reconciliation is not imported.
-
-## Phase 5 parser hardening
-
-Phase 5 retains the Phase 2 architecture and adds a conservative logical-row step between section detection and item parsing. It joins only a labeled code field whose syntax proves that the code continues on the immediately following line. General adjacent text is never merged.
-
-Code extraction now accepts repeated compound qualifiers and narrowly evidenced letter/digit spacing while preserving the raw expression and contributing source lines. Unlabeled code-like text is accepted only as a standalone or delimiter-bounded table cell, preventing references embedded in descriptions from becoming actions. No fuzzy/nearest-code matching or blacklist is used.
-
-Aggregation remains scoped by semantic section type after Patient Payable exclusion and works across repeated headers and continuation pages. Structured Bed Details remains the preferred input to unchanged CN002/CC001/WC001 rules. Strongly structured service/quantity rows with no code become `REVIEW_REQUIRED` advisories with no generated code. The EnhancementPlan includes an explicit executable/blocked/review summary without creating a second plan contract.
-
-Synthetic fixtures under `tests/fixtures/bills/` cover production-like structures and do not contain patient data. Named real PDFs were not accessible in the workspace, so real-PDF regression is not claimed.
-
-## Phase 6 review and custom-code boundary
-
-Custom records are stored outside the executable in `Storage/Custom_Codes/registry.json`; lifecycle/review events are append-only JSON Lines in `Storage/Audit/custom-code-audit.jsonl`. Registry writes use same-directory temporary files followed by atomic rename. The immutable bundled reference JSON is never written.
+External user configuration:
 
 ```text
-EnhancementPlan review evidence → bill-specific REVIEWED decision
-                               ↘ explicit ADD CUSTOM CODE
-Storage custom registry → active validated records → existing RateRepository custom layer
-  → EnhancementPlan captures registry revision/hash/relevant fingerprints
-  → Phase 4 adapter compares current relevant fingerprints
-  → PLAN_STALE on material change, otherwise validated action
+%APPDATA%\CGHS Billing Suite VNEXT\config.json
 ```
 
-Resolution is deterministic: reference records win by default; active custom records resolve only by exact code; a colliding custom record requires an explicit audited override. Inactive records are not loaded. `MANUAL` and `PER_DAY` custom quantity behavior remains review-required; only a positive integer `FIXED` definition can produce `CUSTOM_VALID` in this phase. A rate is optional and never fabricated.
+Bundled `config/default.json` supplies defaults; `user-config.js` performs non-destructive schema migration and preserves unknown settings.
 
-The review queue is a projection of the existing EnhancementPlan and shows evidence rather than creating a second plan model. Bill-specific dismiss/review events never become global definitions. The minimal UI exposes review, explicit add, exact text search, edit, deactivate/reactivate, and audit actions.
+## Security and privacy boundaries
 
-## Phase 7 final-bill boundary
+- Processing and persistence are local.
+- Authentication is manual; credentials and CGHS session tokens are not stored.
+- No external document upload, telemetry, or cloud processing is implemented.
+- Renderer privileges are constrained through preload IPC and context isolation.
+- Diagnostic artifacts are failure-oriented and must not be treated as general patient-data exports.
+- Release outputs must not contain runtime Storage, patient PDFs, credentials, or tokens.
 
-Phase 7 reuses `ingestBillPdf` and the normalized bill model for a second, explicitly separate FINAL BILL source. `src/services/final-bill/` extracts only recognized IP/OP/OT Pharmacy and OT/Ward/Cathlab/other explicitly labelled Consumables sections. Patient Payable records remain excluded. Exact code resolution reuses the existing rate/custom repository; enrichment records never mutate or rerun the historical EnhancementPlan.
+## Packaging architecture
+
+The supported release target is a Windows x64 portable Electron executable:
 
 ```text
-Initial Bill → immutable EnhancementPlan / optional execution reference
-User manually verifies and discharges
-Final PDF → existing ingestion pipeline → section-aware enrichment
-  → deterministic identifier reconciliation (or MATCH_REQUIRED)
-  → CompletedBill → external immutable package
+Node/Electron source
+  + bundled static defaults/assets
+  + PyInstaller portal-executor.exe
+  → electron-builder portable EXE
+  → release manifest and SHA-256 checksums
 ```
 
-Deterministic matching compares bill number, UHID, and IP number. Any conflict stops automatic association; no shared identifier requires an explicit operator/reason resolution. Storage writes versioned packages under `Storage/Bills/YYYY/MM/<bill-run-vN>/` with normalized JSON, extraction audit, and one final-PDF copy when available. A SHA-256 index blocks duplicate final PDFs unless explicit reprocessing creates a new version. Temporary directories and atomic JSON writes prevent silent overwrite; save errors return `SAVE_FAILED` and never `COMPLETED`.
+- `packaging/portal-executor.spec` packages `portal_bridge.py`, `app (1).py`, Selenium, PyQt5, PyMuPDF, and `portal_execution_core.py`.
+- `scripts/build-windows-release.ps1` is the one-command Windows build handoff.
+- Release scripts generate and verify build identity, application artifact hash, and embedded Python executor hash.
+- `.github/workflows/windows-release.yml` uses the same PowerShell entry point when available on the default branch.
 
-## Phase 8 operational case boundary
+Source tooling is implemented, but no actual Windows artifact has been built or run in Arena. Windows runtime and clean-machine acceptance remain pending.
 
-Phase 8 adds persistent orchestration around existing services, not another parser or executor. `CaseStore` keeps atomic manifests, normalized artifacts, and append-only workflow audit under `Storage/Cases/<case-id>/`. `InboxScanner` manually scans `Storage/Inbox/Initial/` and `Storage/Inbox/Final/`, ignores temporary/non-PDF files, requires two unchanged size/mtime observations plus minimum age, then hashes stable PDFs. Originals are copied, never deleted.
+## Dependency direction
 
-`case-state-machine.js` allowlists transitions from NEW through planning, portal checkpoints, explicit verification/discharge acknowledgements, final-bill handling, and COMPLETED. Invalid/skipped transitions fail. Restart converts interrupted `PORTAL_EXECUTING` cases to `RECOVERY_REQUIRED`; live portal work never auto-resumes.
+1. UI depends on preload contracts, not filesystem/process internals.
+2. Desktop composition depends on domain services.
+3. Bill ingestion does not depend on portal automation.
+4. CGHS planning depends on normalized bill and rate/custom snapshots, not Selenium.
+5. Portal adaptation depends on an immutable plan.
+6. Python depends only on the validated execution request and portal state, not Node business rules.
+7. Final-bill and validation services consume existing artifacts without rewriting their history.
+8. Watcher orchestration depends on the existing scanner/workflow and never on portal execution.
+9. Packaging depends on runtime resources; runtime user data never depends on the program directory.
 
-`ActiveCaseLock` persists case ID, process ID, token, acquisition time, and heartbeat. Only its owner can release it. A live lock prevents another case from replacing browser context; dead/expired locks require deterministic recovery. Existing `PLAN_STALE` validation remains at the adapter boundary.
+## Future architecture
 
-The configured external Storage root now contains `Inbox/Initial`, `Inbox/Final`, and `Cases` without migrating or changing existing `Custom_Codes`, `Audit`, or `Bills` data. Source SHA-256 is the duplicate identity. Completed cases are immutable; explicit reprocessing creates a linked versioned case.
-
-## Phase 9 validation boundary
-
-`src/services/validation/` compares one already-normalized bill and one existing EnhancementPlan against a human-reviewed, versioned expected JSON baseline. It never reparses, mutates the plan, updates expected files, or emits executable actions. Reports preserve case/run/source/parser/plan/custom-registry identity and concise row evidence.
-
-The diff separates code presence, quantity, status, section, exclusion, compound, and derived rule-to-plan discrepancies. A missing code is named only when the expected baseline contains concrete reviewed row/rule evidence; otherwise the result is code-free `REVIEW_REQUIRED`. Human classifications (`CONFIRMED`, `FALSE_POSITIVE`, `EXPECTED_VARIATION`, `NEEDS_REVIEW`) annotate findings only—`AUTO_FIX` is unsupported.
-
-Validation reports persist under the existing case directory and extend the Phase 6 review queue rather than creating another queue. `scripts/real-bill-regression.js` discovers privacy-approved local fixtures under `tests/fixtures/bills/real/`, verifies SHA-256 through the validator, performs one parse/plan/validation pass, and writes an actual report. Expected baselines are developer-owned files and are never generated by the harness.
-
-## Development and packaging
-
-- Install pinned dependencies: `npm install`
-- Run locally: `npm start`
-- Development environment: `npm run dev` (POSIX shell; on Windows set `VNEXT_ENV=development` before `npm start`)
-- Run foundation unit tests: `npm test`
-- Run Electron launch/IPC/shutdown smoke test: `npm run test:desktop`
-- Create an unpacked host-platform package: `npm run build:dir`
-- Target Windows portable EXE: `npm run build:win`
-
-The current Phase 1 output target is an Electron Builder Windows x64 portable EXE (`CGHS-Billing-Suite-VNEXT-<version>-<arch>.exe`). It is a packaging direction, not a release-ready artifact. Code signing, installer UX, icons, Windows hardware validation, and final portable/installer policy remain unresolved for Phase 9.
+No additional architecture is committed. OCR, automated discharge, portal final-bill transfer, settlement/reconciliation, cloud processing, and distributed locking are **not implemented** and require separate product and architecture decisions.
