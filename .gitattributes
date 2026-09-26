@@ -1,0 +1,9 @@
+# Normalize line endings to LF for all text files, regardless of the
+# checkout platform's git config (e.g. core.autocrlf=true, which is the
+# default on GitHub-hosted windows-latest runners). Without this, text
+# files -- including hash-pinned reference data such as
+# src/services/cghs/data/hfos-reference-rates.json -- are checked out
+# with CRLF on Windows, changing their SHA-256 and breaking the
+# byte-identical snapshot gates enforced by the Windows release build
+# and its test suite.
+* text=auto eol=lf
